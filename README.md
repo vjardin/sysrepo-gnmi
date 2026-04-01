@@ -9,8 +9,8 @@ the [sysrepo](https://github.com/sysrepo/sysrepo) ecosystem as a first-class
 peer alongside [netopeer2](https://github.com/CESNET/netopeer2) (NETCONF) and
 [Rousette](https://github.com/CESNET/rousette) (RESTCONF). It is a design with
 a single-threaded event loop, it is the leanest gNMI-to-sysrepo
-bridge available - designed from the ground up for embedded systems, O-RAN
-Radio Units, and any platform where footprint and portability matter.
+bridge available - designed from the ground up for embedded systems,and any
+ platform where footprint and portability matter.
 
 It includes a wide test suite for all the scope of its feature sets.
 
@@ -100,8 +100,15 @@ change notifications across all consumers.
 | libevent     | `libevent-dev`                            | Event loop                |
 | cJSON        | `libcjson-dev`                            | JSON manipulation         |
 | PCRE2        | `libpcre2-dev`                            | Required by libyang       |
-| libyang      | meson subproject (v4.2.2, built via cmake) | YANG parsing, JSON_IETF   |
-| sysrepo      | meson subproject (v4.2.10, built via cmake)| YANG datastore            |
+| libyang      | meson subproject, built via cmake           | YANG parsing, JSON_IETF   |
+| sysrepo      | meson subproject, built via cmake           | YANG datastore            |
+
+Two version sets are supported via `-Dcesnet_version=`:
+
+| Option                    |
+|---------------------------|
+| `-Dcesnet_version=v4`     |
+| `-Dcesnet_version=v3`     |
 
 libyang and sysrepo are downloaded by `meson subprojects download` and
 compiled automatically via cmake during the build. They install into
@@ -135,14 +142,23 @@ meson subprojects download
 
 This fetches the libyang and sysrepo source trees into `subprojects/`.
 
-### Build
+### Build with libyang v4 + sysrepo v4 (default)
 
 ```sh
 meson setup builddir
 meson compile -C builddir
 ```
 
-The binary is at `builddir/gnmi_server`.
+### Build with libyang v3 + sysrepo v3
+
+```sh
+meson setup builddir -Dcesnet_version=v3
+meson compile -C builddir
+```
+
+This builds against libyang 3 + sysrepo 3 instead of the
+default v4 set. A compile-time compatibility layer (`src/compat.h`)
+handles the API differences between the two versions.
 
 ### Build with AddressSanitizer
 
@@ -151,6 +167,8 @@ rm -rf builddir
 meson setup builddir -Dsanitize=address
 meson compile -C builddir
 ```
+
+Can be combined with `-Dcesnet_version=v3` to test v3 with ASAN.
 
 Then run the tests (see below).
 

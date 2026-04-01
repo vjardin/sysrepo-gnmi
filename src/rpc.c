@@ -9,7 +9,7 @@
 #include "xpath.h"
 #include "encode.h"
 #include "log.h"
-
+#include "compat.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -113,7 +113,7 @@ grpc_status_code handle_rpc(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
     }
 
     struct lyd_node *op_node = NULL;
-    ly_err = lyd_parse_op(ctx, NULL, in, LYD_JSON, LYD_TYPE_RPC_YANG, 0, &input, &op_node);
+    ly_err = gnmi_lyd_parse_op(ctx, NULL, in, LYD_JSON, LYD_TYPE_RPC_YANG, 0, &input, &op_node);
     ly_in_free(in, 0);
     sr_session_release_context(sess);
     free(json_data);

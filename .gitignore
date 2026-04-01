@@ -1,7 +1,9 @@
 builddir/
 .venv/
 subprojects/libyang/
+subprojects/libyang-v3/
 subprojects/sysrepo/
+subprojects/sysrepo-v3/
 proto/generated/
 __pycache__/
 *.pyc

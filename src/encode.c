@@ -7,7 +7,7 @@
 
 #include "encode.h"
 #include "log.h"
-
+#include "compat.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,7 +65,7 @@ char *encode_json_ietf(const struct lyd_node *node)
       return strdup("{}");
 
     /* Print children with siblings */
-    err = lyd_print_mem(&json, child, LYD_JSON, LYD_PRINT_SIBLINGS | LYD_PRINT_SHRINK);
+    err = lyd_print_mem(&json, child, LYD_JSON, GNMI_LYD_PRINT_SIBLINGS | LYD_PRINT_SHRINK);
     if (err != LY_SUCCESS || !json)
       return strdup("{}");
 
@@ -154,7 +154,7 @@ grpc_status_code decode_json_ietf(sr_session_ctx_t *sess, const char *xpath, con
 
     /* Create path with the actual leaf value */
     const char *val = data[0] ? data : NULL;
-    ly_err = lyd_new_path2(NULL, ctx, xpath, val, 0, LYD_ANYDATA_STRING, LYD_NEW_PATH_UPDATE, &tree, NULL);
+    ly_err = gnmi_lyd_new_path2(NULL, ctx, xpath, val, LYD_NEW_PATH_UPDATE, &tree, NULL);
     if (ly_err != LY_SUCCESS || !tree) {
       if (err_msg)
         *err_msg = strdup("Failed to create leaf path");
@@ -166,7 +166,7 @@ grpc_status_code decode_json_ietf(sr_session_ctx_t *sess, const char *xpath, con
   }
 
   /* Non-leaf: create tree structure at xpath */
-  ly_err = lyd_new_path2(NULL, ctx, xpath, NULL, 0, LYD_ANYDATA_STRING, LYD_NEW_PATH_UPDATE, &tree, NULL);
+  ly_err = gnmi_lyd_new_path2(NULL, ctx, xpath, NULL, LYD_NEW_PATH_UPDATE, &tree, NULL);
   if (ly_err != LY_SUCCESS || !tree) {
     if (err_msg)
       *err_msg = strdup("Failed to create path");

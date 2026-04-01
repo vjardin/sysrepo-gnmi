@@ -21,6 +21,7 @@ threads_dep    = dependency('threads')
 # Prerequisite: run `meson subprojects download` before `meson setup`
 deps_prefix = meson.current_build_dir() / 'deps'
 
+cesnet_version = get_option('cesnet_version')
 
 cesnet_deps = custom_target('cesnet_deps',
   output : 'cesnet_deps.stamp',
@@ -29,7 +30,7 @@ cesnet_deps = custom_target('cesnet_deps',
     meson.current_source_dir(),
     meson.current_build_dir(),
     '@OUTPUT@',
-],
+    cesnet_version],
   console : true,
 )
 
