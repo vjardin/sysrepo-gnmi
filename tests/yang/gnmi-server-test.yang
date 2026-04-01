@@ -1,0 +1,157 @@
+module gnmi-server-test {
+  yang-version 1.1;
+  namespace "https://graphiant.com/yang";
+  prefix test;
+
+  description
+    "gNMI Server Test module
+        Copyright (c) 2025 Graphiant, Inc.
+        All rights reserved.
+        Licensed under the Apache License, Version 2.0 (the 'License');
+        you may not use this file except in compliance with the License.
+        You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+        Unless required by applicable law or agreed to in writing, software
+        distributed under the License is distributed on an 'AS IS' BASIS,
+        WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+        See the License for the specific language governing permissions and
+        limitations under the License.
+    ";
+
+  revision 2021-02-10 {
+    description
+      "Initial revision";
+  }
+
+  container test {
+    list things {
+      key "name";
+
+      leaf name {
+        type string;
+      }
+
+      leaf description {
+        type string;
+      }
+
+      leaf enabled {
+        type boolean;
+      }
+
+      leaf amount {
+        type uint32;
+      }
+
+      leaf signed-amount {
+        type int32;
+      }
+
+      leaf decimal-amount {
+        type decimal64 {
+          fraction-digits 2;
+        }
+      }
+
+      leaf-list amount-history {
+        type uint32;
+      }
+      leaf ready {
+        type empty;
+      }
+    }
+  }
+
+  container test2 {
+    leaf enabled {
+      type boolean;
+    }
+
+    leaf enabled2 {
+      type boolean;
+    }
+
+    leaf custom-error {
+      type uint8;
+      default 0;
+    }
+
+    leaf must-error {
+      must "current() > 42";
+      type uint8;
+    }
+  }
+
+  container test-state {
+    config false;
+    list things {
+      key "name";
+
+      leaf name {
+        type string;
+      }
+
+      leaf counter {
+        type uint64;
+      }
+
+      leaf counter2 {
+        type uint64;
+      }
+
+      leaf-list ll {
+        type string;
+      }
+    }
+
+    container cargo {
+      presence "some deep meaning";
+    }
+  }
+
+  container test3 {
+    list complex-list {
+      key "type name";
+
+      leaf type {
+        type string;
+      }
+
+      leaf name {
+        type string;
+      }
+
+      leaf data {
+        type string;
+      }
+    }
+  }
+
+  container test4 {
+    leaf-list params {
+        type string;
+    }
+  }
+
+  rpc clear-stats {
+    description
+      "An RPC with inputs and outputs.";
+    input {
+      leaf interface {
+        type string;
+      }
+      leaf errors {
+        type empty;
+        description
+          "clear only error stats";
+      }
+    }
+    output {
+      leaf old-stats {
+        type uint64;
+      }
+    }
+  }
+}

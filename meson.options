@@ -1,0 +1,3 @@
+option('sanitize', type : 'combo', choices : ['none', 'address', 'thread', 'undefined'], value : 'none', description : 'Enable sanitizer')
+option('analyzer', type : 'boolean', value : false, description : 'Enable gcc -fanalyzer static analysis')
+option('test_timeout', type : 'integer', value : 300, description : 'Test suite timeout in seconds (use 1800 for valgrind)')
