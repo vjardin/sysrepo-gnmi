@@ -9,7 +9,11 @@ on:
 jobs:
   static-analysis:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    strategy:
+      matrix:
+        cesnet_version: [v3, v4]
+    name: static-analysis (${{ matrix.cesnet_version }})
     steps:
       - uses: actions/checkout@v6
       - name: Install dependencies
@@ -23,24 +27,17 @@ jobs:
             cppcheck clang-tools clang
       - name: Download meson subprojects
         run: meson subprojects download || true
-      - name: Build with gcc -fanalyzer
+      - name: gcc -fanalyzer (${{ matrix.cesnet_version }})
         run: |
-          meson setup builddir-analyzer -Danalyzer=true
-          meson compile -C builddir-analyzer 2>&1 | tee analyzer.log
+          meson setup builddir -Danalyzer=true -Dcesnet_version=${{ matrix.cesnet_version }}
+          meson compile -C builddir 2>&1 | tee analyzer.log
           if grep -q "error:.*-fanalyzer" analyzer.log; then
             echo "::error::gcc -fanalyzer found issues"
             exit 1
           fi
-      - name: clang scan-build
+      - name: cppcheck (${{ matrix.cesnet_version }})
         run: |
-          rm -rf builddir-scan
-          scan-build meson setup builddir-scan 2>&1 | tail -3
-          scan-build meson compile -C builddir-scan 2>&1 | tee scan.log || true
-      - name: cppcheck
-        run: |
-          meson setup builddir-cppcheck 2>/dev/null || true
-          meson compile -C builddir-cppcheck 2>/dev/null || true
-          cppcheck --project=builddir-cppcheck/compile_commands.json \
+          cppcheck --project=builddir/compile_commands.json \
             --enable=warning,performance,portability \
             --suppress=missingIncludeSystem \
             --suppress=unusedFunction \
@@ -48,10 +45,20 @@ jobs:
             --suppress=preprocessorErrorDirective \
             -i subprojects -i proto/generated \
             --error-exitcode=1 2>&1 | tee cppcheck.log
+      - name: clang scan-build (${{ matrix.cesnet_version }})
+        run: |
+          rm -rf builddir-scan
+          scan-build meson setup builddir-scan -Dcesnet_version=${{ matrix.cesnet_version }}
+          scan-build meson compile -C builddir-scan 2>&1 | tee scan.log || true
 
-  test-asan:
+  test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      matrix:
+        cesnet_version: [v3, v4]
+        sanitizer: [address, undefined]
+    name: test-${{ matrix.sanitizer }} (${{ matrix.cesnet_version }})
     steps:
       - uses: actions/checkout@v6
       - name: Install system dependencies
@@ -65,9 +72,11 @@ jobs:
             python3-venv
       - name: Download meson subprojects
         run: meson subprojects download || true
-      - name: Build (ASAN)
+      - name: Build (${{ matrix.sanitizer }}, ${{ matrix.cesnet_version }})
         run: |
-          meson setup builddir -Dsanitize=address
+          meson setup builddir \
+            -Dsanitize=${{ matrix.sanitizer }} \
+            -Dcesnet_version=${{ matrix.cesnet_version }}
           meson compile -C builddir
       - name: Setup Python venv
         run: |
@@ -79,50 +88,12 @@ jobs:
           .venv/bin/python -m grpc_tools.protoc \
             -Iproto --python_out=tests/proto --grpc_python_out=tests/proto \
             proto/gnmi.proto proto/gnmi_ext.proto
-      - name: Run tests (ASAN)
+      - name: Run tests
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/builddir/deps/lib
           GNMI_BUILD_DIR: ${{ github.workspace }}/builddir
           GNMI_YANG_DIR: ${{ github.workspace }}/tests/yang
           no_proxy: localhost,127.0.0.1
           ASAN_OPTIONS: detect_leaks=0
-        run: .venv/bin/pytest tests/ -v --tb=short
-
-  test-ubsan:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v6
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential meson ninja-build cmake pkg-config \
-            libgrpc-dev protobuf-compiler \
-            libprotobuf-c-dev protobuf-c-compiler \
-            libevent-dev libcjson-dev libpcre2-dev \
-            python3-venv
-      - name: Download meson subprojects
-        run: meson subprojects download || true
-      - name: Build (UBSAN)
-        run: |
-          meson setup builddir -Dsanitize=undefined
-          meson compile -C builddir
-      - name: Setup Python venv
-        run: |
-          python3 -m venv .venv
-          .venv/bin/pip install grpcio grpcio-tools pytest
-      - name: Generate Python gRPC stubs
-        run: |
-          mkdir -p tests/proto
-          .venv/bin/python -m grpc_tools.protoc \
-            -Iproto --python_out=tests/proto --grpc_python_out=tests/proto \
-            proto/gnmi.proto proto/gnmi_ext.proto
-      - name: Run tests (UBSAN)
-        env:
-          LD_LIBRARY_PATH: ${{ github.workspace }}/builddir/deps/lib
-          GNMI_BUILD_DIR: ${{ github.workspace }}/builddir
-          GNMI_YANG_DIR: ${{ github.workspace }}/tests/yang
-          no_proxy: localhost,127.0.0.1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: .venv/bin/pytest tests/ -v --tb=short
