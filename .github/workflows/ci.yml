@@ -97,3 +97,48 @@ jobs:
           ASAN_OPTIONS: detect_leaks=0
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: .venv/bin/pytest tests/ -v --tb=short
+
+  deb:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - distro: ubuntu
+            release: noble
+            label: ubuntu-24.04
+          - distro: ubuntu
+            release: plucky
+            label: ubuntu-26.04
+          - distro: debian
+            release: trixie
+            label: debian-13
+    name: deb (${{ matrix.label }})
+    container: ${{ matrix.distro }}:${{ matrix.release }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            build-essential meson ninja-build cmake pkg-config git \
+            libgrpc-dev protobuf-compiler \
+            libprotobuf-c-dev protobuf-c-compiler \
+            libevent-dev libcjson-dev libpcre2-dev \
+            debhelper devscripts
+      - name: Download meson subprojects
+        run: |
+          git config --global --add safe.directory '*'
+          meson subprojects download || true
+      - name: Build .deb
+        run: |
+          dpkg-buildpackage -us -uc -b
+          mkdir -p deb-out
+          cp ../sysrepo-gnmi_*.deb deb-out/
+      - name: Show package info
+        run: dpkg-deb -I deb-out/sysrepo-gnmi_*.deb
+      - name: Upload .deb
+        uses: actions/upload-artifact@v7
+        with:
+          name: deb-${{ matrix.label }}
+          path: deb-out/sysrepo-gnmi_*.deb
