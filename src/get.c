@@ -49,6 +49,16 @@ build_get_updates(sr_session_ctx_t *sess, const char *fullpath, Gnmi__Notificati
   if (ly_err != LY_SUCCESS || !set || set->count == 0)
     goto cleanup;
 
+  gnmi_log(GNMI_LOG_DEBUG, "get: %s matched %u node(s)", fullpath, set->count);
+  for (uint32_t di = 0; di < set->count; di++) {
+    struct lyd_node *dn = set->dnodes[di];
+    gnmi_log(GNMI_LOG_DEBUG, "get: node[%u] %s:%s type=0x%x children=%s",
+             di, dn->schema ? dn->schema->module->name : "?",
+             dn->schema ? dn->schema->name : "(opaque)",
+             dn->schema ? dn->schema->nodetype : 0,
+             lyd_child(dn) ? "yes" : "no");
+  }
+
   /* Allocate update array */
   notif->n_update = set->count;
   notif->update = calloc(set->count, sizeof(Gnmi__Update *));

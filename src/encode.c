@@ -15,6 +15,63 @@
 #include <libyang/in.h>
 #include <cjson/cJSON.h>
 
+/* - JSON unwrap helpers ---------------------------------------------- */
+
+/* Unwrap a container-wrapped JSON: {"module:name": {...}} -> "{...}"
+ * Returns a newly allocated string (caller frees), or strdup("{}"). */
+static char *json_unwrap_container(const char *json)
+{
+  cJSON *root = cJSON_Parse(json);
+  if (!root)
+    return strdup("{}");
+  cJSON *wrapper = root->child;
+  if (!wrapper) {
+    cJSON_Delete(root);
+    return strdup("{}");
+  }
+  char *cj = cJSON_PrintUnformatted(wrapper);
+  cJSON_Delete(root);
+  if (!cj)
+    return strdup("{}");
+  char *result = strdup(cj);
+  cJSON_free(cj);
+  return result ? result : strdup("{}");
+}
+
+/* Extract a named child value from parent JSON.
+ * Parent JSON: {"module:parent": {"module:child": {...}, ...}}
+ * Tries both "module:name" and "name" as keys.
+ * Returns a newly allocated string (caller frees), or strdup("{}"). */
+static char *json_extract_child(const char *json, const char *module, const char *name)
+{
+  cJSON *root = cJSON_Parse(json);
+  if (!root)
+    return strdup("{}");
+  /* Navigate into wrapper: {"mod:parent": {inner}} */
+  cJSON *parent_val = root->child;
+  if (!parent_val || !cJSON_IsObject(parent_val)) {
+    cJSON_Delete(root);
+    return strdup("{}");
+  }
+  /* Try qualified name first, then bare name */
+  char qualified[256];
+  snprintf(qualified, sizeof(qualified), "%s:%s", module, name);
+  cJSON *child = cJSON_GetObjectItem(parent_val, qualified);
+  if (!child)
+    child = cJSON_GetObjectItem(parent_val, name);
+  if (!child) {
+    cJSON_Delete(root);
+    return strdup("{}");
+  }
+  char *cj = cJSON_PrintUnformatted(child);
+  cJSON_Delete(root);
+  if (!cj)
+    return strdup("{}");
+  char *result = strdup(cj);
+  cJSON_free(cj);
+  return result ? result : strdup("{}");
+}
+
 /* - encode_json_ietf: lyd_node -> JSON string ---------------------- */
 
 char *encode_json_ietf(const struct lyd_node *node)
@@ -59,23 +116,63 @@ char *encode_json_ietf(const struct lyd_node *node)
   case LYS_RPC:
   case LYS_ACTION:
   case LYS_NOTIF: {
+    const char *mod_name = node->schema->module->name;
+    const char *node_name = node->schema->name;
+
     /* If no children, return empty object */
     const struct lyd_node *child = lyd_child(node);
     if (!child)
       return strdup("{}");
 
-    /* Print children with siblings */
+    /* Step 1: print children with siblings */
     err = lyd_print_mem(&json, child, LYD_JSON, GNMI_LYD_PRINT_SIBLINGS | LYD_PRINT_SHRINK);
-    if (err != LY_SUCCESS || !json || json[0] == '\0') {
-      /* Fallback: try printing the node itself (handles opaque/complex trees) */
+    if (err == LY_SUCCESS && json && json[0] != '\0')
+      return json;
+
+    gnmi_log(GNMI_LOG_DEBUG, "encode: lyd_print_mem empty for children of %s:%s", mod_name, node_name);
+    free(json);
+    json = NULL;
+
+    /* Step 2: print the node itself and unwrap {"module:name": {...}} */
+    err = lyd_print_mem(&json, node, LYD_JSON, LYD_PRINT_SHRINK);
+    if (err == LY_SUCCESS && json && json[0] != '\0') {
+      char *unwrapped = json_unwrap_container(json);
       free(json);
-      json = NULL;
-      err = lyd_print_mem(&json, node, LYD_JSON, LYD_PRINT_SHRINK);
-      if (err != LY_SUCCESS || !json)
-        return strdup("{}");
+      gnmi_log(GNMI_LOG_DEBUG, "encode: node-level print succeeded for %s:%s", mod_name, node_name);
+      return unwrapped;
     }
 
-    return json;
+    gnmi_log(GNMI_LOG_DEBUG, "encode: node-level print also empty for %s:%s", mod_name, node_name);
+    free(json);
+    json = NULL;
+
+    /* Step 3: print node with siblings flag */
+    err = lyd_print_mem(&json, node, LYD_JSON, GNMI_LYD_PRINT_SIBLINGS | LYD_PRINT_SHRINK);
+    if (err == LY_SUCCESS && json && json[0] != '\0') {
+      char *unwrapped = json_unwrap_container(json);
+      free(json);
+      gnmi_log(GNMI_LOG_DEBUG, "encode: node+siblings print succeeded for %s:%s", mod_name, node_name);
+      return unwrapped;
+    }
+
+    free(json);
+    json = NULL;
+
+    /* Step 4: walk up to parent and extract our node's content */
+    if (node->parent) {
+      gnmi_log(GNMI_LOG_DEBUG, "encode: trying parent for %s:%s", mod_name, node_name);
+      err = lyd_print_mem(&json, &node->parent->node, LYD_JSON, LYD_PRINT_SHRINK);
+      if (err == LY_SUCCESS && json && json[0] != '\0') {
+        char *extracted = json_extract_child(json, mod_name, node_name);
+        free(json);
+        gnmi_log(GNMI_LOG_DEBUG, "encode: parent print succeeded for %s:%s", mod_name, node_name);
+        return extracted;
+      }
+      free(json);
+    }
+
+    gnmi_log(GNMI_LOG_WARNING, "encode: all print attempts failed for %s:%s", mod_name, node_name);
+    return strdup("{}");
   }
 
   default: return strdup("{}");
