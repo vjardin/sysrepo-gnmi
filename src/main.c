@@ -92,11 +92,11 @@ int main(int argc, char **argv)
     case 'L': log_dir = optarg;
       break;
     case 'v': printf("sysrepo-gnmi %s\n", GNMI_SERVER_VERSION);
-      return 0;
+      return EXIT_SUCCESS;
     case 'h': usage(argv[0]);
-      return 0;
+      return EXIT_SUCCESS;
     default: usage(argv[0]);
-      return 1;
+      return EXIT_FAILURE;
     }
   }
 
@@ -124,7 +124,7 @@ int main(int argc, char **argv)
   if (rc != SR_ERR_OK) {
     gnmi_log(GNMI_LOG_FATAL, "sr_connect failed after %d attempts: %s",
        SR_CONNECT_RETRIES, sr_strerror(rc));
-    return 1;
+    return EXIT_FAILURE;
   }
 
   gnmi_log(GNMI_LOG_INFO, "Connected to sysrepo");
@@ -134,7 +134,7 @@ int main(int argc, char **argv)
   if (!srv) {
     gnmi_log(GNMI_LOG_FATAL, "Failed to create server");
     sr_disconnect(sr_conn);
-    return 1;
+    return EXIT_FAILURE;
   }
 
   gnmi_server_run(srv);
@@ -142,5 +142,5 @@ int main(int argc, char **argv)
   gnmi_log(GNMI_LOG_INFO, "Server stopped");
   gnmi_server_destroy(srv);
   sr_disconnect(sr_conn);
-  return 0;
+  return EXIT_SUCCESS;
 }

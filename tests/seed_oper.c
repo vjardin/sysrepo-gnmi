@@ -102,7 +102,7 @@ int main(void)
   int rc = sr_connect(0, &conn);
   if (rc != SR_ERR_OK) {
     fprintf(stderr, "sr_connect: %s\n", sr_strerror(rc));
-    return 1;
+    return EXIT_FAILURE;
   }
   fprintf(stderr, "seed_oper: sr_connect OK\n");
   fflush(stderr);
@@ -186,5 +186,5 @@ cleanup:
     sr_session_stop(sess);
   if (conn)
     sr_disconnect(conn);
-  return 0;
+  return EXIT_SUCCESS;
 }
