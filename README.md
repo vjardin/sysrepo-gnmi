@@ -97,7 +97,7 @@ change notifications across all consumers.
 |--------------|-------------------------------------------|---------------------------|
 | gRPC C core  | `libgrpc-dev`                             | gRPC transport            |
 | protobuf-c   | `libprotobuf-c-dev` `protobuf-c-compiler` | Protobuf serialization    |
-| libevent     | `libevent-dev`                            | Event loop                |
+| libevent     | `libevent-dev` (runtime: `libevent-pthreads`) | Event loop             |
 | cJSON        | `libcjson-dev`                            | JSON manipulation         |
 | PCRE2        | `libpcre2-dev`                            | Required by libyang       |
 | libyang      | meson subproject, built via cmake           | YANG parsing, JSON_IETF   |

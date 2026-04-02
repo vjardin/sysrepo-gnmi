@@ -597,6 +597,55 @@ def test_get_unsupported_use_models(gnmi_stub):
     assert "use_model" in exc_info.value.details()
 
 
+def test_get_empty_origin(gnmi_stub):
+    """Get request with empty origin - should work (default = rfc7951).
+
+    Most gNMI clients (gnmic, gNMIc) don't set origin at all.
+    The server should accept empty origin as the default.
+    """
+    path = gnmi_pb2.Path(
+        origin="",
+        elem=[gnmi_pb2.PathElem(name="gnmi-server-test:test-state")],
+    )
+    req = gnmi_pb2.GetRequest(
+        path=[path],
+        encoding=gnmi_pb2.JSON_IETF,
+    )
+    resp = gnmi_stub.Get(req, timeout=5)
+    assert len(resp.notification) == 1
+    assert resp.notification[0].timestamp > 0
+
+
+def test_get_no_origin(gnmi_stub):
+    """Get request with no origin set at all - should work."""
+    path = gnmi_pb2.Path(
+        elem=[gnmi_pb2.PathElem(name="gnmi-server-test:test-state")],
+    )
+    req = gnmi_pb2.GetRequest(
+        path=[path],
+        encoding=gnmi_pb2.JSON_IETF,
+    )
+    resp = gnmi_stub.Get(req, timeout=5)
+    assert len(resp.notification) == 1
+    assert resp.notification[0].timestamp > 0
+
+
+def test_get_wrong_origin(gnmi_stub):
+    """Get request with unsupported origin - should fail."""
+    path = gnmi_pb2.Path(
+        origin="openconfig",
+        elem=[gnmi_pb2.PathElem(name="gnmi-server-test:test-state")],
+    )
+    req = gnmi_pb2.GetRequest(
+        path=[path],
+        encoding=gnmi_pb2.JSON_IETF,
+    )
+    with pytest.raises(grpc.RpcError) as exc_info:
+        gnmi_stub.Get(req, timeout=5)
+    assert exc_info.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+    assert "origin" in exc_info.value.details().lower()
+
+
 def test_get_relative_path(gnmi_stub):
     """Get request with relative path.
 

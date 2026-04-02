@@ -169,27 +169,26 @@ char *gnmi_merge_xpath(const Gnmi__Path *prefix, const Gnmi__Path *path, char **
 
 int gnmi_check_origin(const Gnmi__Path *prefix, const Gnmi__Path *path, char **err_msg)
 {
-  const char *origin = NULL;
-  const char *label = NULL;
+  /* Accept empty/NULL origin as default (most gNMI clients don't set it).
+   * Only reject if origin is explicitly set to something other than rfc7951.
+   * Check both prefix and path - either can carry a bad origin. */
+  const struct { const Gnmi__Path *p; const char *label; } checks[] = {
+    { prefix, "prefix" },
+    { path,   "path" },
+  };
 
-  if (prefix && prefix->n_elem > 0) {
-    origin = prefix->origin;
-    label = "prefix";
-  } else if (path) {
-    origin = path->origin;
-    label = "path";
-  }
-
-  if (!origin || strcmp(origin, "rfc7951") != 0) {
-    if (err_msg) {
-      char buf[256];
-      snprintf(buf, sizeof(buf), "%s must contain origin of \"rfc7951\""
-         " rather than \"%s\"",
-         label ? label : "path",
-         origin ? origin : "(null)");
-      *err_msg = strdup(buf);
+  for (size_t i = 0; i < sizeof(checks) / sizeof(checks[0]); i++) {
+    const char *origin = checks[i].p ? checks[i].p->origin : NULL;
+    if (origin && origin[0] != '\0' && strcmp(origin, "rfc7951") != 0) {
+      if (err_msg) {
+        char buf[256];
+        snprintf(buf, sizeof(buf), "%s has unsupported origin \"%s\""
+           " (expected \"rfc7951\" or empty)",
+           checks[i].label, origin);
+        *err_msg = strdup(buf);
+      }
+      return -1;
     }
-    return -1;
   }
   return 0;
 }

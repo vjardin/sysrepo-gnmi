@@ -86,10 +86,10 @@ grpc_status_code handle_capabilities(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *r
   resp.n_supported_models = i;
   resp.supported_models = models;
 
-  /* Supported encodings: JSON_IETF only */
-  Gnmi__Encoding enc = GNMI__ENCODING__JSON_IETF;
-  resp.n_supported_encodings = 1;
-  resp.supported_encodings = &enc;
+  /* Supported encodings: JSON_IETF and JSON (both use the same codec) */
+  Gnmi__Encoding encs[] = { GNMI__ENCODING__JSON_IETF, GNMI__ENCODING__JSON };
+  resp.n_supported_encodings = sizeof(encs) / sizeof(encs[0]);
+  resp.supported_encodings = encs;
 
   /* gNMI version from proto descriptor */
   resp.gnmi_version = "0.7.0";

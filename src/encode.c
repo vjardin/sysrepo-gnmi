@@ -66,8 +66,14 @@ char *encode_json_ietf(const struct lyd_node *node)
 
     /* Print children with siblings */
     err = lyd_print_mem(&json, child, LYD_JSON, GNMI_LYD_PRINT_SIBLINGS | LYD_PRINT_SHRINK);
-    if (err != LY_SUCCESS || !json)
-      return strdup("{}");
+    if (err != LY_SUCCESS || !json || json[0] == '\0') {
+      /* Fallback: try printing the node itself (handles opaque/complex trees) */
+      free(json);
+      json = NULL;
+      err = lyd_print_mem(&json, node, LYD_JSON, LYD_PRINT_SHRINK);
+      if (err != LY_SUCCESS || !json)
+        return strdup("{}");
+    }
 
     return json;
   }

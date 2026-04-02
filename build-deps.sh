@@ -16,17 +16,33 @@ if [ -f "$STAMP" ]; then
     exit 0
 fi
 
-# Select subproject directories based on version
+# Select subproject directories and git refs based on version
 if [ "$VERSION" = "v3" ]; then
     LIBYANG_DIR="$SRC/libyang-v3"
     SYSREPO_DIR="$SRC/sysrepo-v3"
-    # Fallback: if -v3 dirs don't exist, try renaming from download
-    [ -d "$LIBYANG_DIR" ] || LIBYANG_DIR="$SRC/libyang"
-    [ -d "$SYSREPO_DIR" ] || SYSREPO_DIR="$SRC/sysrepo"
+    LIBYANG_URL="https://github.com/CESNET/libyang.git"
+    SYSREPO_URL="https://github.com/sysrepo/sysrepo.git"
+    LIBYANG_REF="v3.13.6"
+    SYSREPO_REF="v3.7.11"
 else
     LIBYANG_DIR="$SRC/libyang"
     SYSREPO_DIR="$SRC/sysrepo"
+    LIBYANG_URL="https://github.com/CESNET/libyang.git"
+    SYSREPO_URL="https://github.com/sysrepo/sysrepo.git"
+    LIBYANG_REF="v4.2.2"
+    SYSREPO_REF="v4.2.10"
 fi
+
+# Auto-download if subproject dirs don't exist
+for dir_url_ref in "$LIBYANG_DIR $LIBYANG_URL $LIBYANG_REF" "$SYSREPO_DIR $SYSREPO_URL $SYSREPO_REF"; do
+    dir=$(echo "$dir_url_ref" | cut -d' ' -f1)
+    url=$(echo "$dir_url_ref" | cut -d' ' -f2)
+    ref=$(echo "$dir_url_ref" | cut -d' ' -f3)
+    if [ ! -d "$dir" ]; then
+        echo "=== Cloning $url ($ref) into $dir ==="
+        git clone --depth 1 --branch "$ref" "$url" "$dir"
+    fi
+done
 
 echo "=== Building CESNET deps ($VERSION) ==="
 echo "  libyang: $LIBYANG_DIR"

@@ -22,9 +22,10 @@ def test_capability_request(gnmi_stub):
     # gNMI version
     assert response.gNMI_version == "0.7.0"
 
-    # Only JSON_IETF encoding supported
-    assert len(response.supported_encodings) == 1
-    assert response.supported_encodings[0] == gnmi_pb2.JSON_IETF
+    # JSON_IETF and JSON encodings supported
+    assert len(response.supported_encodings) == 2
+    assert gnmi_pb2.JSON_IETF in response.supported_encodings
+    assert gnmi_pb2.JSON in response.supported_encodings
 
     # Test YANG modules should be present
     model_names = {m.name: m for m in response.supported_models}
