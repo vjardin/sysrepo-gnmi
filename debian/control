@@ -1,0 +1,35 @@
+Source: sysrepo-gnmi
+Section: net
+Priority: optional
+Maintainer: Vincent Jardin <vjardin@free.fr>
+Build-Depends: debhelper-compat (= 13),
+               meson,
+               ninja-build,
+               cmake,
+               pkg-config,
+               libgrpc-dev,
+               protobuf-compiler,
+               libprotobuf-c-dev,
+               protobuf-c-compiler,
+               libevent-dev,
+               libcjson-dev,
+               libpcre2-dev
+Standards-Version: 4.6.2
+Homepage: https://github.com/vjardin/sysrepo-gnmi
+Rules-Requires-Root: no
+
+Package: sysrepo-gnmi
+Architecture: any
+Depends: ${shlibs:Depends},
+         ${misc:Depends}
+Description: Pure C gNMI server for sysrepo
+ The smallest, most portable gNMI server for the sysrepo ecosystem.
+ A zero-C++ implementation that plugs directly into sysrepo as a
+ first-class peer alongside netopeer2 (NETCONF) and Rousette (RESTCONF).
+ .
+ Features:
+  - All 6 gNMI RPCs: Capabilities, Get, Set, Subscribe, Rpc, Confirm
+  - Subscribe modes: STREAM (on-change + sample), ONCE, POLL
+  - JSON_IETF encoding via libyang C API
+  - Single-threaded libevent event loop
+  - NACM integration

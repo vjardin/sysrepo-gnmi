@@ -1,0 +1,18 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+
+%:
+	dh $@ --buildsystem=meson
+
+override_dh_auto_configure:
+	meson subprojects download || true
+	dh_auto_configure -- --prefix=/usr -Dsanitize=none -Danalyzer=false
+
+override_dh_auto_install:
+	dh_auto_install
+	install -D -m 644 conf/gnmi-server.service \
+		debian/sysrepo-gnmi/lib/systemd/system/gnmi-server.service
+
+override_dh_shlibdeps:
+	dh_shlibdeps --dpkg-shlibdeps-params=--ignore-missing-info
