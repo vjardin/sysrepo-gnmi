@@ -206,7 +206,7 @@ process_updates(sr_session_ctx_t *sess, size_t n_updates, Gnmi__Update **updates
     gnmi_log(GNMI_LOG_DEBUG, "Set %s: %s", operation, fullpath);
 
     /* Check for wildcards in update (not allowed).
-     * Exception: "/*" means root (empty path). */
+     * Exception: "/\*" means root (empty path). */
     if (strchr(fullpath, '*') && strcmp(fullpath, "/*") != 0) {
       if (err_msg)
         *err_msg = strdup(

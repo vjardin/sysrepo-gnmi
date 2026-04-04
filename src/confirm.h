@@ -17,7 +17,7 @@
  *
  * Flow:
  *   1. Set RPC with confirm_parms -> confirm_state_snapshot()
- *      - Snapshots running config via sr_get_data("/*")
+ *      - Snapshots running config via sr_get_data("/\*")
  *      - Arms evtimer with timeout_secs
  *   2. If Confirm RPC arrives before timeout -> confirm_state_confirm()
  *      - Copies running to startup

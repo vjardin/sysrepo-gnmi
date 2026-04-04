@@ -67,14 +67,6 @@ struct rpc_method {
   unary_handler_fn  handler;   /* unary RPCs only */
 };
 
-static grpc_status_code handle_unimplemented(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *req, grpc_byte_buffer **resp,
-               char **status_msg)
-{
-  (void)sr_conn; (void)req; (void)resp;
-  *status_msg = strdup("RPC not yet implemented");
-  return GRPC_STATUS_UNIMPLEMENTED;
-}
-
 static struct rpc_method methods[] = {
   { "/gnmi.gNMI/Capabilities", NULL, false, handle_capabilities },
   { "/gnmi.gNMI/Get",          NULL, false, handle_get },
