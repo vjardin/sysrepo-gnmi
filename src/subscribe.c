@@ -416,10 +416,12 @@ static void stream_send_next(struct stream_ctx *sctx)
     switch (sctx->mode) {
     case SUB_MODE_ONCE:
       /* ONCE: close the stream */
+      gnmi_log(GNMI_LOG_DEBUG, "Subscribe ONCE: complete (%zu messages sent)", sctx->send_queue_len);
       stream_close(sctx, GRPC_STATUS_OK, NULL);
       return;
     case SUB_MODE_POLL:
       /* POLL: wait for next Poll message */
+      gnmi_log(GNMI_LOG_DEBUG, "Subscribe POLL: waiting for next poll request");
       sctx->state = STREAM_RECV_POLL;
       {
         grpc_op op = {0};

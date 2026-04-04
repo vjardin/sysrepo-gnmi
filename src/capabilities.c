@@ -21,6 +21,8 @@ grpc_status_code handle_capabilities(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *r
 {
   (void)request_bb; /* CapabilityRequest has no meaningful fields */
 
+  gnmi_log(GNMI_LOG_DEBUG, "Capabilities request");
+
   sr_session_ctx_t *sess = NULL;
   sr_data_t *sr_data = NULL;
   Gnmi__CapabilityResponse resp = GNMI__CAPABILITY_RESPONSE__INIT;
@@ -97,6 +99,9 @@ grpc_status_code handle_capabilities(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *r
   /* Pack into grpc_byte_buffer */
   *response_bb = gnmi_pack((ProtobufCMessage *)&resp);
   ret = GRPC_STATUS_OK;
+
+  gnmi_log(GNMI_LOG_DEBUG, "Capabilities: %zu models, %zu encodings, version %s",
+           resp.n_supported_models, resp.n_supported_encodings, resp.gnmi_version);
 
 cleanup:
   /* Free models */

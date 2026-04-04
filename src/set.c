@@ -100,6 +100,8 @@ process_deletes(sr_session_ctx_t *sess, const Gnmi__SetRequest *req, const char 
       fullpath = combined;
     }
 
+    gnmi_log(GNMI_LOG_DEBUG, "Set delete: %s", fullpath);
+
     /* Copy path to result */
     r->path = calloc(1, sizeof(*r->path));
     gnmi__path__init(r->path);
@@ -201,6 +203,8 @@ process_updates(sr_session_ctx_t *sess, size_t n_updates, Gnmi__Update **updates
       fullpath = path_str;
     }
 
+    gnmi_log(GNMI_LOG_DEBUG, "Set %s: %s", operation, fullpath);
+
     /* Check for wildcards in update (not allowed).
      * Exception: "/*" means root (empty path). */
     if (strchr(fullpath, '*') && strcmp(fullpath, "/*") != 0) {
@@ -265,6 +269,8 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
   }
 
   max_results = req->n_delete_ + req->n_replace + req->n_update;
+  gnmi_log(GNMI_LOG_DEBUG, "Set: %zu delete, %zu replace, %zu update",
+           req->n_delete_, req->n_replace, req->n_update);
   results = calloc(max_results ? max_results : 1, sizeof(*results));
 
   /* Create sessions */

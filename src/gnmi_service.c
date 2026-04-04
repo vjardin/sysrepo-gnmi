@@ -131,12 +131,17 @@ static void step_got_call(struct call_ctx *base, bool success)
   grpc_status_code code;
 
   struct rpc_method *m = &methods[ctx->method_idx];
+  gnmi_log(GNMI_LOG_DEBUG, "RPC %s received", m->path);
   if (m->handler) {
     code = m->handler(gnmi_server_get_sr_conn(base->srv), base->request_payload, &response_bb, &status_msg);
   } else {
     code = GRPC_STATUS_UNIMPLEMENTED;
     status_msg = strdup("Not implemented");
   }
+  gnmi_log(GNMI_LOG_DEBUG, "RPC %s completed (status=%d%s%s)",
+           m->path, code,
+           status_msg ? " msg=" : "",
+           status_msg ? status_msg : "");
 
   /* Build batch: send metadata + message + status, recv close */
   grpc_op ops[4];
