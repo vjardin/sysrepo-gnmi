@@ -1183,3 +1183,52 @@ def test_subscribe_poll_dup_sub(gnmi_stub):
     with pytest.raises(grpc.RpcError) as exc_info:
         list(gnmi_stub.Subscribe(request_iter(), timeout=10))
     assert exc_info.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+
+def test_subscribe_too_many_subscriptions(gnmi_stub):
+    """Subscribe with more than MAX_SUBS_PER_STREAM (256) subscriptions.
+
+    Equivalent to: "Subscribe with too many subscriptions" [subs-limits]
+    Server must reject with RESOURCE_EXHAUSTED.
+    """
+    # Build 257 subscriptions (one over the limit)
+    subs = []
+    for i in range(257):
+        subs.append(gnmi_pb2.Subscription(
+            path=xpath_to_path(f"/gnmi-server-test:test-state"),
+        ))
+
+    sl = gnmi_pb2.SubscriptionList(
+        subscription=subs,
+        mode=gnmi_pb2.SubscriptionList.ONCE,
+        encoding=gnmi_pb2.JSON_IETF,
+    )
+    req = gnmi_pb2.SubscribeRequest(subscribe=sl)
+
+    with pytest.raises(grpc.RpcError) as exc_info:
+        list(gnmi_stub.Subscribe(iter([req]), timeout=10))
+    assert exc_info.value.code() == grpc.StatusCode.RESOURCE_EXHAUSTED
+    assert "Too many subscriptions" in exc_info.value.details()
+
+
+def test_subscribe_at_max_subscriptions(gnmi_stub):
+    """Subscribe with exactly MAX_SUBS_PER_STREAM (256) subscriptions.
+
+    Equivalent to: "Subscribe at max subscriptions" [subs-limits]
+    Server must accept this (boundary test).
+    """
+    subs = []
+    for i in range(256):
+        subs.append(gnmi_pb2.Subscription(
+            path=xpath_to_path("/gnmi-server-test:test-state"),
+        ))
+
+    sl = gnmi_pb2.SubscriptionList(
+        subscription=subs,
+        mode=gnmi_pb2.SubscriptionList.ONCE,
+        encoding=gnmi_pb2.JSON_IETF,
+    )
+    req = gnmi_pb2.SubscribeRequest(subscribe=sl)
+
+    responses = list(gnmi_stub.Subscribe(iter([req]), timeout=30))
+    assert any(r.sync_response for r in responses)
