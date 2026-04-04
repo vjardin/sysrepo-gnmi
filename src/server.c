@@ -170,7 +170,7 @@ gnmi_server_t *gnmi_server_create(const struct gnmi_config *cfg, sr_conn_ctx_t *
       .value.integer = 1 },
   };
   grpc_channel_args ch_args = {
-    .num_args = 5,
+    .num_args = sizeof(args_arr) / sizeof(args_arr[0]),
     .args = args_arr,
   };
   srv->grpc_srv = grpc_server_create(&ch_args, NULL);

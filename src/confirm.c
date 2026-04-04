@@ -109,7 +109,7 @@ int confirm_state_snapshot(confirm_state_t *cs, uint32_t timeout_secs, uint32_t 
   /* Set timeout */
   cs->timeout_secs = timeout_secs ? timeout_secs : DEFAULT_TIMEOUT_SECS;
   cs->wait_confirm = true;
-  cs->earliest_ns = get_time_nanosec() + (uint64_t)cs->min_wait_secs * 1000000000ULL;
+  cs->earliest_ns = get_time_nanosec() + (uint64_t)cs->min_wait_secs * NSEC_PER_SEC;
 
   /* Arm the timer */
   struct timeval tv = { .tv_sec = cs->timeout_secs, .tv_usec = 0 };

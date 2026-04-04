@@ -619,8 +619,8 @@ static void stream_arm_subscriptions(struct stream_ctx *sctx)
        * so we can compute sctx from the entry pointer. */
 
       struct timeval tv;
-      tv.tv_sec = e->sample_interval_ns / 1000000000ULL;
-      tv.tv_usec = (e->sample_interval_ns % 1000000000ULL) / 1000;
+      tv.tv_sec = e->sample_interval_ns / NSEC_PER_SEC;
+      tv.tv_usec = (e->sample_interval_ns % NSEC_PER_SEC) / NSEC_PER_USEC;
       evtimer_add(e->ev_timer, &tv);
 
       gnmi_log(GNMI_LOG_DEBUG, "Subscribe STREAM: SAMPLE timer for %s "
@@ -782,8 +782,8 @@ static void on_sample_timer(evutil_socket_t fd, short what, void *arg)
 
   /* Re-arm the timer */
   struct timeval tv;
-  tv.tv_sec = e->sample_interval_ns / 1000000000ULL;
-  tv.tv_usec = (e->sample_interval_ns % 1000000000ULL) / 1000;
+  tv.tv_sec = e->sample_interval_ns / NSEC_PER_SEC;
+  tv.tv_usec = (e->sample_interval_ns % NSEC_PER_SEC) / NSEC_PER_USEC;
   evtimer_add(e->ev_timer, &tv);
 
   /* Try to send */

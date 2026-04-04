@@ -14,6 +14,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define RPC_DEFAULT_TIMEOUT_MS  2000   /* 2s default RPC timeout */
+#define RPC_MAX_TIMEOUT_MS     10000   /* 10s maximum RPC timeout */
+
 #include <sysrepo.h>
 #include <libyang/libyang.h>
 #include <libyang/in.h>
@@ -59,10 +62,9 @@ grpc_status_code handle_rpc(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
     goto cleanup;
   }
 
-  /* Timeout: default 2000ms, max 10000ms */
-  uint32_t timeout_ms = req->timeout ? req->timeout * 1000 : 2000;
-  if (timeout_ms > 10000)
-    timeout_ms = 10000;
+  uint32_t timeout_ms = req->timeout ? req->timeout * 1000 : RPC_DEFAULT_TIMEOUT_MS;
+  if (timeout_ms > RPC_MAX_TIMEOUT_MS)
+    timeout_ms = RPC_MAX_TIMEOUT_MS;
 
   gnmi_log(GNMI_LOG_DEBUG, "Rpc RPC (%s) timeout %ums", xpath, timeout_ms);
 
