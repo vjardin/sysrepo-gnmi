@@ -22,6 +22,10 @@ static enum gnmi_log_level current_level = GNMI_LOG_WARNING;
 static int use_syslog;
 static char *txn_log_dir;
 
+static void gnmi_sr_log_cb(sr_log_level_t level, const char *msg);
+static void gnmi_ly_log_cb(LY_LOG_LEVEL level, const char *msg,
+      const char *data_path, const char *schema_path, uint64_t line);
+
 static const char *level_str[] = {
   [GNMI_LOG_FATAL]   = "FATAL",
   [GNMI_LOG_ERROR]   = "ERROR",
@@ -46,13 +50,14 @@ void gnmi_log_init(int level)
     level = GNMI_LOG_DEBUG;
   current_level = level;
 
-  sr_log_stderr(level >= GNMI_LOG_DEBUG ? SR_LL_DBG : level >= GNMI_LOG_INFO ? SR_LL_INF :
-          level >= GNMI_LOG_WARNING ? SR_LL_WRN :
-          SR_LL_ERR);
+  /* Route sysrepo logs through our callback for consistent formatting.
+   * Disable direct stderr output; the callback filters by level. */
+  sr_log_stderr(SR_LL_NONE);
+  sr_log_set_cb(gnmi_sr_log_cb);
 
-  ly_log_level(level >= GNMI_LOG_DEBUG ? LY_LLDBG : level >= GNMI_LOG_INFO ? LY_LLVRB :
-         level >= GNMI_LOG_WARNING ? LY_LLWRN :
-         LY_LLERR);
+  /* Route libyang logs through our callback for consistent formatting. */
+  ly_set_log_clb(gnmi_ly_log_cb);
+  ly_log_level(level >= GNMI_LOG_WARNING ? LY_LLWRN : LY_LLERR);
 }
 
 void gnmi_log_enable_syslog(const char *ident)
@@ -93,18 +98,35 @@ void gnmi_log(enum gnmi_log_level lvl, const char *fmt, ...)
   fputc('\n', stderr);
 }
 
-void gnmi_sr_log_cb(sr_log_level_t level, const char *msg)
+static void gnmi_sr_log_cb(sr_log_level_t level, const char *msg)
 {
+  /* Cap sysrepo at INFO to suppress verbose internal debug (SHM dumps, etc.) */
+  if (level > SR_LL_INF)
+    return;
+
   enum gnmi_log_level lvl;
 
   switch (level) {
   case SR_LL_ERR: lvl = GNMI_LOG_ERROR; break;
   case SR_LL_WRN: lvl = GNMI_LOG_WARNING; break;
   case SR_LL_INF: lvl = GNMI_LOG_INFO; break;
-  case SR_LL_DBG: lvl = GNMI_LOG_DEBUG; break;
-  default:        lvl = GNMI_LOG_DEBUG; break;
+  default:        return;
   }
   gnmi_log(lvl, "sysrepo: %s", msg);
+}
+
+static void gnmi_ly_log_cb(LY_LOG_LEVEL level, const char *msg,
+      const char *data_path, const char *schema_path, uint64_t line)
+{
+  (void)data_path; (void)schema_path; (void)line;
+  enum gnmi_log_level lvl;
+
+  switch (level) {
+  case LY_LLERR: lvl = GNMI_LOG_ERROR; break;
+  case LY_LLWRN: lvl = GNMI_LOG_WARNING; break;
+  default:       return;
+  }
+  gnmi_log(lvl, "libyang: %s", msg);
 }
 
 /* - Transaction data logging -------------------------------------- */

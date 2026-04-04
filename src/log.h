@@ -25,9 +25,6 @@ void gnmi_log_enable_syslog(const char *ident);
 void gnmi_log(enum gnmi_log_level lvl, const char *fmt, ...)
   __attribute__((format(printf, 2, 3)));
 
-/* Callbacks to route library logs through our logger */
-void gnmi_sr_log_cb(sr_log_level_t level, const char *msg);
-
 /* Transaction data logging (audit trail).
  * Writes data to a file in log_dir/raw/ for traceability.
  * Pass log_dir=NULL to disable. */

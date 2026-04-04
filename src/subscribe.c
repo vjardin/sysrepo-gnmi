@@ -734,6 +734,10 @@ static void on_sample_timer(evutil_socket_t fd, short what, void *arg)
   struct sub_entry *e = arg;
   struct stream_ctx *sctx = e->sctx;
 
+  /* Stop re-arming if the server is shutting down */
+  if (gnmi_server_is_shutting_down(sctx->base.srv))
+    return;
+
   gnmi_log(GNMI_LOG_DEBUG, "SAMPLE timer fired for %s (state=%d queue_len=%zu)",
      e->xpath, sctx->state, sctx->send_queue_len);
 
