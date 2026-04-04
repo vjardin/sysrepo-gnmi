@@ -42,9 +42,23 @@ batch_op(struct stream_ctx *sctx, grpc_op *ops, size_t n)
   return grpc_call_start_batch(sctx->base.call, ops, n, &sctx->base, NULL);
 }
 
-/* Queue a protobuf-c message for sending. */
+/* Max queued messages per stream before closing (backpressure).
+ * Prevents OOM if a client reads slowly while timers keep firing. */
+#define SEND_QUEUE_MAX  1024
+
+/* Max subscriptions per SubscribeRequest (resource limit). */
+#define MAX_SUBS_PER_STREAM  256
+
+/* Queue a protobuf-c message for sending.
+ * Returns 0 on success, -1 on failure (OOM or queue full). */
 static int send_queue_push(struct stream_ctx *sctx, grpc_byte_buffer *bb)
 {
+  if (sctx->send_queue_len >= SEND_QUEUE_MAX) {
+    gnmi_log(GNMI_LOG_WARNING, "Subscribe: send queue full (%zu), dropping client",
+             sctx->send_queue_len);
+    grpc_byte_buffer_destroy(bb);
+    return -1;
+  }
   grpc_byte_buffer **tmp = realloc(sctx->send_queue, (sctx->send_queue_len + 1) *
            sizeof(grpc_byte_buffer *));
   if (!tmp) {
@@ -138,21 +152,22 @@ build_subscribe_data(struct stream_ctx *sctx, Gnmi__SubscriptionList *sublist)
   }
 
   /* Pack and queue the notification as a SubscribeResponse */
+  int qrc = 0;
   if (total_updates > 0 || sublist->n_subscription > 0) {
     Gnmi__SubscribeResponse resp = GNMI__SUBSCRIBE_RESPONSE__INIT;
     resp.response_case =
       GNMI__SUBSCRIBE_RESPONSE__RESPONSE_UPDATE;
     resp.update = &notif;
-    send_queue_push(sctx, gnmi_pack((ProtobufCMessage *)&resp));
+    qrc = send_queue_push(sctx, gnmi_pack((ProtobufCMessage *)&resp));
   }
 
   /* Build sync_response */
-  {
+  if (qrc == 0) {
     Gnmi__SubscribeResponse sync = GNMI__SUBSCRIBE_RESPONSE__INIT;
     sync.response_case =
       GNMI__SUBSCRIBE_RESPONSE__RESPONSE_SYNC_RESPONSE;
     sync.sync_response = 1;
-    send_queue_push(sctx, gnmi_pack((ProtobufCMessage *)&sync));
+    qrc = send_queue_push(sctx, gnmi_pack((ProtobufCMessage *)&sync));
   }
 
   /* Cleanup */
@@ -178,7 +193,7 @@ build_subscribe_data(struct stream_ctx *sctx, Gnmi__SubscriptionList *sublist)
   }
 
   sr_session_stop(sess);
-  return 0;
+  return qrc;
 }
 
 /* - Validate subscribe request ------------------------------------ */
@@ -195,6 +210,12 @@ validate_subscribe(Gnmi__SubscribeRequest *req, char **err_msg)
   if (!sl) {
     *err_msg = strdup("Empty subscription list");
     return GRPC_STATUS_INVALID_ARGUMENT;
+  }
+
+  /* Check subscription count */
+  if (sl->n_subscription > MAX_SUBS_PER_STREAM) {
+    *err_msg = strdup("Too many subscriptions");
+    return GRPC_STATUS_RESOURCE_EXHAUSTED;
   }
 
   /* Check encoding */
@@ -635,8 +656,14 @@ static void stream_arm_subscriptions(struct stream_ctx *sctx)
   }
 
   /* Enter STREAM_ACTIVE state.
-   * Client disconnect is detected when a send fails (success=false).
-   * No concurrent recv needed - keeps the CQ tag unambiguous. */
+   *
+   * Client disconnect is detected when a send fails (success=false in
+   * step_send_msg).  We cannot issue a concurrent RECV_MESSAGE because
+   * gRPC CQ events carry the same tag for both SEND and RECV, and the
+   * state machine cannot disambiguate which completed.
+   *
+   * Dead/slow clients are handled by gRPC server keepalive (configured
+   * in server.c) which closes the transport after two missed pings. */
   sctx->state = STREAM_ACTIVE;
 
   gnmi_log(GNMI_LOG_INFO, "Subscribe STREAM: active with %zu entries", sctx->n_entries);
@@ -694,7 +721,7 @@ static void stream_queue_sample(struct stream_ctx *sctx, struct sub_entry *e)
   Gnmi__SubscribeResponse resp = GNMI__SUBSCRIBE_RESPONSE__INIT;
   resp.response_case = GNMI__SUBSCRIBE_RESPONSE__RESPONSE_UPDATE;
   resp.update = &notif;
-  send_queue_push(sctx, gnmi_pack((ProtobufCMessage *)&resp));
+  int qrc = send_queue_push(sctx, gnmi_pack((ProtobufCMessage *)&resp));
 
   /* Cleanup */
   for (uint32_t j = 0; j < set->count; j++) {
@@ -710,6 +737,9 @@ static void stream_queue_sample(struct stream_ctx *sctx, struct sub_entry *e)
   free(notif.update);
   ly_set_free(set, NULL);
   sr_release_data(sr_data);
+
+  if (qrc < 0)
+    stream_close(sctx, GRPC_STATUS_RESOURCE_EXHAUSTED, "Send queue overflow");
 }
 
 /* Try to send queued messages (called after timer/change enqueues) */
@@ -773,7 +803,11 @@ static int on_sr_change_cb(sr_session_ctx_t *session, uint32_t sub_id, const cha
   if (event != SR_EV_DONE)
     return SR_ERR_OK;
 
-  /* Stash the session for the main-loop callback to use */
+  /* Stash the session for the main-loop callback to use.
+   * Thread safety: this write is followed by event_active() which
+   * internally acquires a libevent mutex, providing a full memory
+   * barrier.  The main-loop reader (on_change_event) runs after the
+   * event is activated, so the write is guaranteed visible. */
   e->change_sess = session;
 
   /* Wake the main event loop - thread-safe */
@@ -860,7 +894,7 @@ static void stream_queue_delta(struct stream_ctx *sctx, struct sub_entry *e)
   Gnmi__SubscribeResponse resp = GNMI__SUBSCRIBE_RESPONSE__INIT;
   resp.response_case = GNMI__SUBSCRIBE_RESPONSE__RESPONSE_UPDATE;
   resp.update = &notif;
-  send_queue_push(sctx, gnmi_pack((ProtobufCMessage *)&resp));
+  int qrc = send_queue_push(sctx, gnmi_pack((ProtobufCMessage *)&resp));
 
   /* Cleanup */
   for (size_t i = 0; i < n_updates; i++) {
@@ -883,6 +917,9 @@ static void stream_queue_delta(struct stream_ctx *sctx, struct sub_entry *e)
     }
   }
   free(deletes);
+
+  if (qrc < 0)
+    stream_close(sctx, GRPC_STATUS_RESOURCE_EXHAUSTED, "Send queue overflow");
 }
 
 /* ON_CHANGE event callback - fires on the main libevent loop */

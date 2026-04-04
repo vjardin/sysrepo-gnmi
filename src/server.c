@@ -147,6 +147,10 @@ gnmi_server_t *gnmi_server_create(const struct gnmi_config *cfg, sr_conn_ctx_t *
   const char *max_msg_env = getenv("GNMI_MAX_MSG_SIZE_KB");
   int max_msg_bytes = max_msg_env ? atoi(max_msg_env) * 1024
           : GNMI_DEFAULT_MAX_MSG_BYTES;
+
+#define GNMI_KEEPALIVE_TIME_MS      30000  /* send ping every 30s */
+#define GNMI_KEEPALIVE_TIMEOUT_MS   10000  /* close after 10s with no pong */
+
   grpc_arg args_arr[] = {
     { .type = GRPC_ARG_INTEGER,
       .key = GRPC_ARG_MAX_RECEIVE_MESSAGE_LENGTH,
@@ -154,9 +158,19 @@ gnmi_server_t *gnmi_server_create(const struct gnmi_config *cfg, sr_conn_ctx_t *
     { .type = GRPC_ARG_INTEGER,
       .key = GRPC_ARG_MAX_SEND_MESSAGE_LENGTH,
       .value.integer = max_msg_bytes },
+    /* Keepalive: detect dead/unresponsive clients and reclaim resources */
+    { .type = GRPC_ARG_INTEGER,
+      .key = GRPC_ARG_KEEPALIVE_TIME_MS,
+      .value.integer = GNMI_KEEPALIVE_TIME_MS },
+    { .type = GRPC_ARG_INTEGER,
+      .key = GRPC_ARG_KEEPALIVE_TIMEOUT_MS,
+      .value.integer = GNMI_KEEPALIVE_TIMEOUT_MS },
+    { .type = GRPC_ARG_INTEGER,
+      .key = GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS,
+      .value.integer = 1 },
   };
   grpc_channel_args ch_args = {
-    .num_args = 2,
+    .num_args = 5,
     .args = args_arr,
   };
   srv->grpc_srv = grpc_server_create(&ch_args, NULL);
