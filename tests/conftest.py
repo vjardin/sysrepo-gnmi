@@ -131,14 +131,19 @@ def gnmi_server(gnmi_env, seed_oper):
     server_log_path = os.path.join(build_dir, "gnmi_server.log")
     server_log = open(server_log_path, "w")
 
-    # Optionally run under valgrind
+    # Optionally run under valgrind or strace
     cmd = [binary, "-f", "-b", GNMI_BIND, "-l", "4"]
     use_valgrind = os.environ.get("GNMI_VALGRIND", "")
+    use_strace = os.environ.get("GNMI_STRACE", "")
     if use_valgrind:
         valgrind_log = os.path.join(build_dir, "valgrind.log")
         cmd = ["valgrind", "--leak-check=full", "--track-origins=yes",
                "--error-exitcode=99",
                f"--log-file={valgrind_log}"] + cmd
+    elif use_strace:
+        strace_log = os.path.join(build_dir, "strace.log")
+        cmd = ["strace", "-f", "-e", "trace=network,desc,memory",
+               "-o", strace_log] + cmd
 
     proc = subprocess.Popen(
         cmd,
@@ -148,7 +153,7 @@ def gnmi_server(gnmi_env, seed_oper):
     )
 
     host, port = GNMI_BIND.split(":")
-    wait_timeout = 60 if use_valgrind else GNMI_TIMEOUT
+    wait_timeout = 60 if (use_valgrind or use_strace) else GNMI_TIMEOUT
     if not _wait_for_port(host, int(port), timeout=wait_timeout):
         proc.kill()
         stdout, stderr = proc.communicate(timeout=5)
