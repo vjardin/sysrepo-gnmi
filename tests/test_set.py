@@ -1339,3 +1339,61 @@ def test_set_wildcard_in_update(gnmi_stub):
     assert exc_info.value.code() == grpc.StatusCode.INVALID_ARGUMENT
 
 
+
+
+def test_set_replace_removes_absent_children(gnmi_stub):
+    """gNMI REPLACE must delete children not in the new value.
+
+    Equivalent to: "Set replace removes absent children" [set-replace]
+    Create two leaves in test2, replace the container with only one,
+    verify the other is gone.
+    """
+    # Set both enabled and enabled2
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        update=[
+            gnmi_pb2.Update(
+                path=xpath_to_path("/gnmi-server-test:test2/enabled"),
+                val=gnmi_pb2.TypedValue(json_ietf_val=b'true'),
+            ),
+            gnmi_pb2.Update(
+                path=xpath_to_path("/gnmi-server-test:test2/enabled2"),
+                val=gnmi_pb2.TypedValue(json_ietf_val=b'true'),
+            ),
+        ],
+    ), timeout=5)
+
+    # Verify both exist
+    resp = gnmi_stub.Get(gnmi_pb2.GetRequest(
+        path=[xpath_to_path("/gnmi-server-test:test2")],
+        type=gnmi_pb2.GetRequest.CONFIG,
+        encoding=gnmi_pb2.JSON_IETF,
+    ), timeout=5)
+    json_data = resp.notification[0].update[0].val.json_ietf_val.decode()
+    assert "enabled" in json_data
+    assert "enabled2" in json_data
+
+    # REPLACE test2 with only enabled -- enabled2 should be removed
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        replace=[gnmi_pb2.Update(
+            path=xpath_to_path("/gnmi-server-test:test2"),
+            val=gnmi_pb2.TypedValue(
+                json_ietf_val=b'{"gnmi-server-test:enabled": false}',
+            ),
+        )],
+    ), timeout=5)
+
+    # Verify enabled2 is gone
+    resp = gnmi_stub.Get(gnmi_pb2.GetRequest(
+        path=[xpath_to_path("/gnmi-server-test:test2")],
+        type=gnmi_pb2.GetRequest.CONFIG,
+        encoding=gnmi_pb2.JSON_IETF,
+    ), timeout=5)
+    json_data = resp.notification[0].update[0].val.json_ietf_val.decode()
+    assert "enabled2" not in json_data, (
+        f"REPLACE should remove absent children, but enabled2 still present: {json_data}"
+    )
+
+    # Cleanup
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        delete=[xpath_to_path("/gnmi-server-test:test2")],
+    ), timeout=5)
