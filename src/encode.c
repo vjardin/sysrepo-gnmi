@@ -274,6 +274,13 @@ grpc_status_code encode_node(Gnmi__Encoding encoding, const struct lyd_node *nod
     return GRPC_STATUS_OK;
   }
 
+  /* TODO: BYTES encoding (gNMI 0.7.0 s2.3)
+   * BYTES returns opaque byte sequences for values, typically used
+   * for binary YANG types or vendor-specific payloads.  Not
+   * implemented because it requires a serialization format agreement
+   * between client and server that gNMI does not standardize -- the
+   * spec says "the specific encoding is not defined by this
+   * specification".  No mainstream gNMI client uses BYTES. */
   default: if (err_msg)
       *err_msg = strdup("Unsupported encoding");
     return GRPC_STATUS_UNIMPLEMENTED;

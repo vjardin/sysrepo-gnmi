@@ -227,7 +227,12 @@ validate_subscribe(Gnmi__SubscribeRequest *req, char **err_msg)
     return GRPC_STATUS_INVALID_ARGUMENT;
   }
 
-  /* Check unsupported features */
+  /* TODO: use_aliases (gNMI 0.7.0 s3.5.1.6)
+   * Aliases let the client define short names for frequently-used
+   * paths, reducing per-message overhead on long-lived streams.
+   * Not implemented because no mainstream gNMI client (gnmic, Arista
+   * gNMIc, OpenConfig collector) uses this feature, and it requires
+   * per-stream alias state management (map of alias->path). */
   if (sl->use_aliases) {
     *err_msg = strdup("use_aliases not supported");
     return GRPC_STATUS_INVALID_ARGUMENT;
