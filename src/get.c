@@ -19,8 +19,27 @@
 
 /* - Build updates for a single xpath ------------------------------ */
 
+/* Check if a node's module matches any entry in the use_models filter.
+ * Returns true if use_models is empty (no filter) or the module matches. */
+static bool model_filter_match(const struct lyd_node *node,
+    Gnmi__ModelData **use_models, size_t n_use_models)
+{
+  if (n_use_models == 0)
+    return true;  /* no filter */
+  if (!node->schema)
+    return false;
+  const char *mod_name = node->schema->module->name;
+  for (size_t i = 0; i < n_use_models; i++) {
+    if (use_models[i]->name && strcmp(use_models[i]->name, mod_name) == 0)
+      return true;
+  }
+  return false;
+}
+
 static grpc_status_code
-build_get_updates(sr_session_ctx_t *sess, const char *fullpath, Gnmi__Notification *notif, char **err_msg)
+build_get_updates(sr_session_ctx_t *sess, const char *fullpath,
+    Gnmi__ModelData **use_models, size_t n_use_models,
+    Gnmi__Notification *notif, char **err_msg)
 {
   sr_data_t *sr_data = NULL;
   struct ly_set *set = NULL;
@@ -60,16 +79,20 @@ build_get_updates(sr_session_ctx_t *sess, const char *fullpath, Gnmi__Notificati
              lyd_child(dn) ? "yes" : "no");
   }
 
-  /* Allocate update array */
-  notif->n_update = set->count;
+  /* Allocate update array (may be sparse if use_models filters some out) */
   notif->update = calloc(set->count, sizeof(Gnmi__Update *));
   if (!notif->update) {
     ret = GRPC_STATUS_INTERNAL;
     goto cleanup;
   }
 
+  uint32_t n_added = 0;
   for (uint32_t i = 0; i < set->count; i++) {
     struct lyd_node *node = set->dnodes[i];
+
+    /* use_models filter: skip nodes from non-matching modules */
+    if (!model_filter_match(node, use_models, n_use_models))
+      continue;
 
     Gnmi__Update *upd = calloc(1, sizeof(*upd));
     gnmi__update__init(upd);
@@ -94,8 +117,9 @@ build_get_updates(sr_session_ctx_t *sess, const char *fullpath, Gnmi__Notificati
       goto cleanup;
     }
 
-    notif->update[i] = upd;
+    notif->update[n_added++] = upd;
   }
+  notif->n_update = n_added;
 
 cleanup:
   if (set)
@@ -111,6 +135,7 @@ static grpc_status_code
 build_get_notification(sr_session_ctx_t *sess, const Gnmi__Path *prefix, const Gnmi__Path *path,
            Gnmi__Encoding encoding,
            Gnmi__GetRequest__DataType data_type,
+           Gnmi__ModelData **use_models, size_t n_use_models,
            Gnmi__Notification *notif,
            char **err_msg)
 {
@@ -150,7 +175,7 @@ build_get_notification(sr_session_ctx_t *sess, const Gnmi__Path *prefix, const G
   orig_ds = sr_session_get_ds(sess);
   sr_session_switch_ds(sess, ds);
 
-  ret = build_get_updates(sess, fullpath, notif, err_msg);
+  ret = build_get_updates(sess, fullpath, use_models, n_use_models, notif, err_msg);
 
   /* Restore original datastore */
   sr_session_switch_ds(sess, orig_ds);
@@ -183,12 +208,7 @@ grpc_status_code handle_get(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
     goto cleanup;
   }
 
-  /* Validate no use_models */
-  if (req->n_use_models > 0) {
-    *status_msg = strdup("use_model feature unsupported");
-    ret = GRPC_STATUS_UNIMPLEMENTED;
-    goto cleanup;
-  }
+  /* use_models accepted; filtering applied in build_get_updates */
 
   /* All gNMI DataTypes accepted: ALL(0), CONFIG(1), STATE(2), OPERATIONAL(3).
    * CONFIG maps to running DS; others use operational DS. */
@@ -227,7 +247,8 @@ grpc_status_code handle_get(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
     if (!path)
       path = &root_path;
 
-    ret = build_get_notification(sess, req->prefix, path, req->encoding, req->type, notif, status_msg);
+    ret = build_get_notification(sess, req->prefix, path, req->encoding, req->type,
+                                   req->use_models, req->n_use_models, notif, status_msg);
     if (ret != GRPC_STATUS_OK)
       goto cleanup;
   }

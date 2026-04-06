@@ -580,21 +580,20 @@ def test_get_unsupported_encoding(gnmi_stub):
     assert exc_info.value.code() == grpc.StatusCode.UNIMPLEMENTED
 
 
-def test_get_unsupported_use_models(gnmi_stub):
-    """Get request with unsupported use of models.
+def test_get_use_models_specific_path(gnmi_stub):
+    """Get a specific path with use_models matching its module.
 
-    Equivalent to: "Get request with unsupported use of models" [get-neg]
+    Equivalent to: "Get with use_models on specific path" [get-use-models]
     """
     path = xpath_to_path("/gnmi-server-test:test-state")
     req = gnmi_pb2.GetRequest(
         path=[path],
         encoding=gnmi_pb2.JSON_IETF,
-        use_models=[gnmi_pb2.ModelData(name="foo")],
+        use_models=[gnmi_pb2.ModelData(name="gnmi-server-test")],
     )
-    with pytest.raises(grpc.RpcError) as exc_info:
-        gnmi_stub.Get(req, timeout=5)
-    assert exc_info.value.code() == grpc.StatusCode.UNIMPLEMENTED
-    assert "use_model" in exc_info.value.details()
+    resp = gnmi_stub.Get(req, timeout=10)
+    assert len(resp.notification) == 1
+    assert len(resp.notification[0].update) >= 1
 
 
 def test_get_empty_origin(gnmi_stub):
@@ -680,3 +679,43 @@ def test_get_state_datatype(gnmi_stub):
     resp = gnmi_stub.Get(req, timeout=10)
     assert len(resp.notification) == 1
     assert len(resp.notification[0].update) >= 1
+
+
+def test_get_use_models_single(gnmi_stub):
+    """Get with use_models filtering to a single module.
+
+    Equivalent to: "Get with use_models single module" [get-use-models]
+    Only data from the specified module should be returned.
+    """
+    path = xpath_to_path("/*")
+    req = gnmi_pb2.GetRequest(
+        path=[path],
+        encoding=gnmi_pb2.JSON_IETF,
+        use_models=[gnmi_pb2.ModelData(name="gnmi-server-test")],
+    )
+    resp = gnmi_stub.Get(req, timeout=10)
+    assert len(resp.notification) == 1
+    # Should have gnmi-server-test data but not other modules
+    notif = resp.notification[0]
+    for upd in notif.update:
+        first_elem = upd.path.elem[0].name if upd.path.elem else ""
+        assert "gnmi-server-test" in first_elem, (
+            f"Expected only gnmi-server-test data, got {first_elem}"
+        )
+
+
+def test_get_use_models_filter_out(gnmi_stub):
+    """Get with use_models for a nonexistent module.
+
+    Equivalent to: "Get with use_models filter out" [get-use-models]
+    No data should match, response should have empty updates.
+    """
+    path = xpath_to_path("/*")
+    req = gnmi_pb2.GetRequest(
+        path=[path],
+        encoding=gnmi_pb2.JSON_IETF,
+        use_models=[gnmi_pb2.ModelData(name="nonexistent-module")],
+    )
+    resp = gnmi_stub.Get(req, timeout=10)
+    assert len(resp.notification) == 1
+    assert len(resp.notification[0].update) == 0
