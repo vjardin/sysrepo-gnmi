@@ -1,0 +1,5 @@
+[wrap-git]
+url = https://github.com/sysrepo/sysrepo.git
+revision = v4.5.4
+depth = 1
+clone-recursive = false

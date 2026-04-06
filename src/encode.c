@@ -161,7 +161,7 @@ char *encode_json_ietf(const struct lyd_node *node)
     /* Step 4: walk up to parent and extract our node's content */
     if (node->parent) {
       gnmi_log(GNMI_LOG_DEBUG, "encode: trying parent for %s:%s", mod_name, node_name);
-      err = lyd_print_mem(&json, &node->parent->node, LYD_JSON, LYD_PRINT_SHRINK);
+      err = lyd_print_mem(&json, lyd_parent(node), LYD_JSON, LYD_PRINT_SHRINK);
       if (err == LY_SUCCESS && json && json[0] != '\0') {
         char *extracted = json_extract_child(json, mod_name, node_name);
         free(json);

@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 
 #include "log.h"
+#include "compat.h"
 
 #include <errno.h>
 #include <stdarg.h>
@@ -23,8 +24,12 @@ static int use_syslog;
 static char *txn_log_dir;
 
 static void gnmi_sr_log_cb(sr_log_level_t level, const char *msg);
+#ifdef GNMI_LIBYANG_V2
+static void gnmi_ly_log_cb(LY_LOG_LEVEL level, const char *msg, const char *path);
+#else
 static void gnmi_ly_log_cb(LY_LOG_LEVEL level, const char *msg,
       const char *data_path, const char *schema_path, uint64_t line);
+#endif
 
 static const char *level_str[] = {
   [GNMI_LOG_FATAL]   = "FATAL",
@@ -56,7 +61,11 @@ void gnmi_log_init(int level)
   sr_log_set_cb(gnmi_sr_log_cb);
 
   /* Route libyang logs through our callback for consistent formatting. */
+#ifdef GNMI_LIBYANG_V2
+  ly_set_log_clb(gnmi_ly_log_cb, 0);
+#else
   ly_set_log_clb(gnmi_ly_log_cb);
+#endif
   ly_log_level(level >= GNMI_LOG_WARNING ? LY_LLWRN : LY_LLERR);
 }
 
@@ -115,10 +124,16 @@ static void gnmi_sr_log_cb(sr_log_level_t level, const char *msg)
   gnmi_log(lvl, "sysrepo: %s", msg);
 }
 
+#ifdef GNMI_LIBYANG_V2
+static void gnmi_ly_log_cb(LY_LOG_LEVEL level, const char *msg, const char *path)
+{
+  (void)path;
+#else
 static void gnmi_ly_log_cb(LY_LOG_LEVEL level, const char *msg,
       const char *data_path, const char *schema_path, uint64_t line)
 {
   (void)data_path; (void)schema_path; (void)line;
+#endif
   enum gnmi_log_level lvl;
 
   switch (level) {

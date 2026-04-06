@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include <sysrepo.h>
+#include "compat.h"
 
 static volatile sig_atomic_t running = 1;
 
@@ -76,7 +77,7 @@ clear_stats_rpc_cb(sr_session_ctx_t *session, uint32_t sub_id, const char *op_pa
   }
 
   /* Set output */
-  lyd_new_path(output, NULL, "old-stats", "613", LYD_NEW_VAL_OUTPUT, NULL);
+  lyd_new_path(output, NULL, "old-stats", "613", GNMI_LYD_NEW_VAL_OUTPUT, NULL);
 
   return SR_ERR_OK;
 }

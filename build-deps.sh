@@ -17,21 +17,35 @@ if [ -f "$STAMP" ]; then
 fi
 
 # Select subproject directories and git refs based on version
-if [ "$VERSION" = "v3" ]; then
-    LIBYANG_DIR="$SRC/libyang-v3"
-    SYSREPO_DIR="$SRC/sysrepo-v3"
-    LIBYANG_URL="https://github.com/CESNET/libyang.git"
-    SYSREPO_URL="https://github.com/sysrepo/sysrepo.git"
-    LIBYANG_REF="v3.13.6"
-    SYSREPO_REF="v3.7.11"
-else
-    LIBYANG_DIR="$SRC/libyang"
-    SYSREPO_DIR="$SRC/sysrepo"
-    LIBYANG_URL="https://github.com/CESNET/libyang.git"
-    SYSREPO_URL="https://github.com/sysrepo/sysrepo.git"
-    LIBYANG_REF="v4.2.2"
-    SYSREPO_REF="v4.2.10"
-fi
+LIBYANG_URL="https://github.com/CESNET/libyang.git"
+SYSREPO_URL="https://github.com/sysrepo/sysrepo.git"
+
+case "$VERSION" in
+    v2)
+        LIBYANG_DIR="$SRC/libyang-v2"
+        SYSREPO_DIR="$SRC/sysrepo-v2"
+        LIBYANG_REF="v2.1.148"
+        SYSREPO_REF="v2.2.36"
+        ;;
+    v3)
+        LIBYANG_DIR="$SRC/libyang-v3"
+        SYSREPO_DIR="$SRC/sysrepo-v3"
+        LIBYANG_REF="v3.13.6"
+        SYSREPO_REF="v3.7.11"
+        ;;
+    v5)
+        LIBYANG_DIR="$SRC/libyang-v5"
+        SYSREPO_DIR="$SRC/sysrepo-v5"
+        LIBYANG_REF="v5.4.9"
+        SYSREPO_REF="v4.5.4"
+        ;;
+    *)  # v4 (default)
+        LIBYANG_DIR="$SRC/libyang"
+        SYSREPO_DIR="$SRC/sysrepo"
+        LIBYANG_REF="v4.2.2"
+        SYSREPO_REF="v4.2.10"
+        ;;
+esac
 
 # Auto-download if subproject dirs don't exist
 for dir_url_ref in "$LIBYANG_DIR $LIBYANG_URL $LIBYANG_REF" "$SYSREPO_DIR $SYSREPO_URL $SYSREPO_REF"; do
