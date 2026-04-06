@@ -220,7 +220,8 @@ validate_subscribe(Gnmi__SubscribeRequest *req, char **err_msg)
 
   /* Check encoding */
   if (sl->encoding != GNMI__ENCODING__JSON_IETF &&
-      sl->encoding != GNMI__ENCODING__JSON) {
+      sl->encoding != GNMI__ENCODING__JSON &&
+      sl->encoding != GNMI__ENCODING__ASCII) {
     *err_msg = strdup("Unsupported encoding");
     return GRPC_STATUS_INVALID_ARGUMENT;
   }

@@ -200,6 +200,25 @@ grpc_status_code encode_node(Gnmi__Encoding encoding, const struct lyd_node *nod
     return GRPC_STATUS_OK;
   }
 
+  case GNMI__ENCODING__ASCII: {
+    /* ASCII: plain string for leaves, JSON for containers */
+    char *ascii = NULL;
+    if (node->schema &&
+        (node->schema->nodetype & (LYS_LEAF | LYS_LEAFLIST))) {
+      const char *v = lyd_get_value(node);
+      ascii = v ? strdup(v) : strdup("");
+    } else {
+      lyd_print_mem(&ascii, node, LYD_JSON,
+        GNMI_LYD_PRINT_SIBLINGS | LYD_PRINT_SHRINK);
+      if (!ascii)
+        ascii = strdup("{}");
+    }
+    gnmi__typed_value__init(val);
+    val->value_case = GNMI__TYPED_VALUE__VALUE_ASCII_VAL;
+    val->ascii_val = ascii;
+    return GRPC_STATUS_OK;
+  }
+
   default: if (err_msg)
       *err_msg = strdup("Unsupported encoding");
     return GRPC_STATUS_UNIMPLEMENTED;

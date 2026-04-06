@@ -38,6 +38,7 @@ static bool model_filter_match(const struct lyd_node *node,
 
 static grpc_status_code
 build_get_updates(sr_session_ctx_t *sess, const char *fullpath,
+    Gnmi__Encoding encoding,
     Gnmi__ModelData **use_models, size_t n_use_models,
     Gnmi__Notification *notif, char **err_msg)
 {
@@ -108,7 +109,7 @@ build_get_updates(sr_session_ctx_t *sess, const char *fullpath,
 
     /* Encode value */
     upd->val = calloc(1, sizeof(*upd->val));
-    ret = encode_node(GNMI__ENCODING__JSON_IETF, node, upd->val, err_msg);
+    ret = encode_node(encoding, node, upd->val, err_msg);
     if (ret != GRPC_STATUS_OK) {
       gnmi_path_free_elems(upd->path);
       free(upd->path);
@@ -139,7 +140,6 @@ build_get_notification(sr_session_ctx_t *sess, const Gnmi__Path *prefix, const G
            Gnmi__Notification *notif,
            char **err_msg)
 {
-  (void)encoding; /* only JSON_IETF supported */
   grpc_status_code ret;
   sr_datastore_t ds = SR_DS_OPERATIONAL;
   sr_datastore_t orig_ds;
@@ -175,7 +175,7 @@ build_get_notification(sr_session_ctx_t *sess, const Gnmi__Path *prefix, const G
   orig_ds = sr_session_get_ds(sess);
   sr_session_switch_ds(sess, ds);
 
-  ret = build_get_updates(sess, fullpath, use_models, n_use_models, notif, err_msg);
+  ret = build_get_updates(sess, fullpath, encoding, use_models, n_use_models, notif, err_msg);
 
   /* Restore original datastore */
   sr_session_switch_ds(sess, orig_ds);
@@ -202,7 +202,8 @@ grpc_status_code handle_get(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
 
   /* Validate encoding */
   if (req->encoding != GNMI__ENCODING__JSON_IETF &&
-      req->encoding != GNMI__ENCODING__JSON) {
+      req->encoding != GNMI__ENCODING__JSON &&
+      req->encoding != GNMI__ENCODING__ASCII) {
     *status_msg = strdup("Unsupported encoding");
     ret = GRPC_STATUS_UNIMPLEMENTED;
     goto cleanup;
@@ -276,6 +277,9 @@ cleanup:
           if (u->val->value_case ==
               GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL)
             free(u->val->json_ietf_val.data);
+          else if (u->val->value_case ==
+              GNMI__TYPED_VALUE__VALUE_ASCII_VAL)
+            free(u->val->ascii_val);
           free(u->val);
         }
         free(u);

@@ -719,3 +719,58 @@ def test_get_use_models_filter_out(gnmi_stub):
     resp = gnmi_stub.Get(req, timeout=10)
     assert len(resp.notification) == 1
     assert len(resp.notification[0].update) == 0
+
+
+def test_get_ascii_encoding_leaf(gnmi_stub):
+    """Get a leaf with ASCII encoding.
+
+    Equivalent to: "Get with ASCII encoding (leaf)" [get-ascii]
+    TypedValue should use ascii_val with the plain string value.
+    """
+    # Create data
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        update=[gnmi_pb2.Update(
+            path=xpath_to_path(
+                "/gnmi-server-test:test/things[name='AsciiTest']/description"
+            ),
+            val=gnmi_pb2.TypedValue(json_ietf_val=b'"hello-ascii"'),
+        )],
+    ), timeout=5)
+
+    path = xpath_to_path(
+        "/gnmi-server-test:test/things[name='AsciiTest']/description"
+    )
+    req = gnmi_pb2.GetRequest(
+        path=[path],
+        type=gnmi_pb2.GetRequest.CONFIG,
+        encoding=gnmi_pb2.ASCII,
+    )
+    resp = gnmi_stub.Get(req, timeout=10)
+    assert len(resp.notification) == 1
+    assert len(resp.notification[0].update) == 1
+    val = resp.notification[0].update[0].val
+    assert val.ascii_val == "hello-ascii"
+
+    # Cleanup
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        delete=[xpath_to_path("/gnmi-server-test:test/things[name='AsciiTest']")],
+    ), timeout=5)
+
+
+def test_get_ascii_encoding_container(gnmi_stub):
+    """Get a container with ASCII encoding.
+
+    Equivalent to: "Get with ASCII encoding (container)" [get-ascii]
+    TypedValue should use ascii_val with a readable representation.
+    """
+    path = xpath_to_path("/gnmi-server-test:test-state")
+    req = gnmi_pb2.GetRequest(
+        path=[path],
+        encoding=gnmi_pb2.ASCII,
+    )
+    resp = gnmi_stub.Get(req, timeout=10)
+    assert len(resp.notification) == 1
+    assert len(resp.notification[0].update) >= 1
+    val = resp.notification[0].update[0].val
+    # Container should have a non-empty text representation
+    assert len(val.ascii_val) > 0
