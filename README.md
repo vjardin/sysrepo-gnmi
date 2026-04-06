@@ -103,12 +103,14 @@ change notifications across all consumers.
 | libyang      | meson subproject, built via cmake           | YANG parsing, JSON_IETF   |
 | sysrepo      | meson subproject, built via cmake           | YANG datastore            |
 
-Two version sets are supported via `-Dcesnet_version=`:
+Four version sets are supported via `-Dcesnet_version=`:
 
-| Option                    |
-|---------------------------|
-| `-Dcesnet_version=v4`     |
-| `-Dcesnet_version=v3`     |
+| Option                    | libyang | sysrepo |
+|---------------------------|---------|---------|
+| `-Dcesnet_version=v2`     | 2.1.148 | 2.2.36  |
+| `-Dcesnet_version=v3`     | 3.13.6  | 3.7.11  |
+| `-Dcesnet_version=v4`     | 4.2.2   | 4.2.10  |
+| `-Dcesnet_version=v5`     | 5.4.9   | 4.5.4   |
 
 libyang and sysrepo are downloaded by `meson subprojects download` and
 compiled automatically via cmake during the build. They install into
@@ -149,16 +151,15 @@ meson setup builddir
 meson compile -C builddir
 ```
 
-### Build with libyang v3 + sysrepo v3
+### Build with another CESNET version
 
 ```sh
 meson setup builddir -Dcesnet_version=v3
 meson compile -C builddir
 ```
 
-This builds against libyang 3 + sysrepo 3 instead of the
-default v4 set. A compile-time compatibility layer (`src/compat.h`)
-handles the API differences between the two versions.
+A compile-time compatibility layer (`src/compat.h`) handles the API
+differences between libyang/sysrepo v2, v3, v4, and v5.
 
 ### Build with AddressSanitizer
 
@@ -168,7 +169,7 @@ meson setup builddir -Dsanitize=address
 meson compile -C builddir
 ```
 
-Can be combined with `-Dcesnet_version=v3` to test v3 with ASAN.
+Can be combined with any `-Dcesnet_version=` to test with ASAN.
 
 Then run the tests (see below).
 
@@ -266,6 +267,35 @@ GNMI_VALGRIND=1 .venv/bin/pytest tests/ -s
 ```sh
 .venv/bin/pytest tests/test_get.py::test_get_composite_key -v
 ```
+
+### Run with strace
+
+```sh
+GNMI_STRACE=1 .venv/bin/pytest tests/ -v
+# strace output: builddir/strace.log
+```
+
+### Run all CESNET versions in Docker
+
+The `ci-local.sh` script builds and tests all supported CESNET version
+combinations in Docker containers (requires Docker):
+
+```sh
+# Test all versions (v2, v3, v4, v5) in parallel
+./ci-local.sh all
+
+# Test a single version
+./ci-local.sh v5
+```
+
+Supported version matrix:
+
+| Option | libyang | sysrepo |
+|--------|---------|---------|
+| `v2`   | 2.1.148 | 2.2.36  |
+| `v3`   | 3.13.6  | 3.7.11  |
+| `v4`   | 4.2.2   | 4.2.10  |
+| `v5`   | 5.4.9   | 4.5.4   |
 
 ## Installing on a system with sysrepo
 
