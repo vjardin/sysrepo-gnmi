@@ -99,6 +99,12 @@ struct stream_ctx {
   /* STREAM mode: pending recv for client disconnect detection */
   bool               recv_pending;
 
+  /* allow_aggregation: merge multiple sub_entry samples into one
+   * Notification before sending (gNMI 0.7.0 s3.5.1.1). */
+  bool               allow_aggregation;
+  Gnmi__Update     **agg_updates;     /* pending aggregated updates */
+  size_t             agg_n_updates;
+
   /* Close status */
   grpc_status_code   close_code;
   char              *close_msg;

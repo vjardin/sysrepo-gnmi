@@ -589,6 +589,8 @@ static void stream_arm_subscriptions(struct stream_ctx *sctx)
   struct event_base *evbase = gnmi_server_get_evbase(sctx->base.srv);
   sr_conn_ctx_t *sr_conn = gnmi_server_get_sr_conn(sctx->base.srv);
 
+  sctx->allow_aggregation = sl->allow_aggregation;
+
   /* Create a session for STREAM mode data fetching */
   int rc = sr_session_start(sr_conn, SR_DS_OPERATIONAL, &sctx->sr_sess);
   if (rc != SR_ERR_OK) {
@@ -742,6 +744,27 @@ static void stream_queue_sample(struct stream_ctx *sctx, struct sub_entry *e)
     notif.update[j] = upd;
   }
 
+  /* allow_aggregation: accumulate updates without sending yet.
+   * They'll be flushed as one Notification in stream_flush_aggregated(). */
+  if (sctx->allow_aggregation) {
+    Gnmi__Update **tmp = realloc(sctx->agg_updates,
+      (sctx->agg_n_updates + set->count) * sizeof(Gnmi__Update *));
+    if (tmp) {
+      sctx->agg_updates = tmp;
+      for (uint32_t j = 0; j < set->count; j++)
+        sctx->agg_updates[sctx->agg_n_updates++] = notif.update[j];
+      /* Ownership transferred -- don't free the updates */
+      free(notif.update);
+    } else {
+      /* OOM -- fall through to non-aggregated send */
+      goto send_now;
+    }
+    ly_set_free(set, NULL);
+    sr_release_data(sr_data);
+    return;
+  }
+
+send_now:;
   Gnmi__SubscribeResponse resp = GNMI__SUBSCRIBE_RESPONSE__INIT;
   resp.response_case = GNMI__SUBSCRIBE_RESPONSE__RESPONSE_UPDATE;
   resp.update = &notif;
@@ -766,9 +789,48 @@ static void stream_queue_sample(struct stream_ctx *sctx, struct sub_entry *e)
     stream_close(sctx, GRPC_STATUS_RESOURCE_EXHAUSTED, "Send queue overflow");
 }
 
+/* Flush aggregated updates into one Notification and queue it. */
+static void stream_flush_aggregated(struct stream_ctx *sctx)
+{
+  if (sctx->agg_n_updates == 0)
+    return;
+
+  Gnmi__Notification notif = GNMI__NOTIFICATION__INIT;
+  notif.timestamp = get_time_nanosec();
+  notif.n_update = sctx->agg_n_updates;
+  notif.update = sctx->agg_updates;
+
+  Gnmi__SubscribeResponse resp = GNMI__SUBSCRIBE_RESPONSE__INIT;
+  resp.response_case = GNMI__SUBSCRIBE_RESPONSE__RESPONSE_UPDATE;
+  resp.update = &notif;
+  int qrc = send_queue_push(sctx, gnmi_pack((ProtobufCMessage *)&resp));
+
+  /* Free updates (ownership was with aggregation buffer) */
+  for (size_t i = 0; i < sctx->agg_n_updates; i++) {
+    Gnmi__Update *u = sctx->agg_updates[i];
+    if (u->path) { gnmi_path_free_elems(u->path); free(u->path); }
+    if (u->val) {
+      if (u->val->value_case == GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL)
+        free(u->val->json_ietf_val.data);
+      free(u->val);
+    }
+    free(u);
+  }
+  free(sctx->agg_updates);
+  sctx->agg_updates = NULL;
+  sctx->agg_n_updates = 0;
+
+  if (qrc < 0)
+    stream_close(sctx, GRPC_STATUS_RESOURCE_EXHAUSTED, "Send queue overflow");
+}
+
 /* Try to send queued messages (called after timer/change enqueues) */
 static void stream_try_send(struct stream_ctx *sctx)
 {
+  /* Flush any aggregated updates into the send queue first */
+  if (sctx->allow_aggregation)
+    stream_flush_aggregated(sctx);
+
   gnmi_log(GNMI_LOG_DEBUG, "stream_try_send: state=%d queue_len=%zu idx=%zu",
      sctx->state, sctx->send_queue_len, sctx->send_queue_idx);
 
@@ -1047,6 +1109,19 @@ static void stream_free(struct stream_ctx *sctx)
     grpc_byte_buffer_destroy(sctx->recv_msg);
   if (sctx->send_msg)
     grpc_byte_buffer_destroy(sctx->send_msg);
+
+  /* Free aggregated updates if any */
+  for (size_t i = 0; i < sctx->agg_n_updates; i++) {
+    Gnmi__Update *u = sctx->agg_updates[i];
+    if (u->path) { gnmi_path_free_elems(u->path); free(u->path); }
+    if (u->val) {
+      if (u->val->value_case == GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL)
+        free(u->val->json_ietf_val.data);
+      free(u->val);
+    }
+    free(u);
+  }
+  free(sctx->agg_updates);
 
   /* Free send queue */
   for (size_t i = 0; i < sctx->send_queue_len; i++)

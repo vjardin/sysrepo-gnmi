@@ -1430,3 +1430,50 @@ def test_subscribe_on_change_heartbeat(gnmi_stub):
     assert len(data_responses) >= 3, (
         f"Expected >=3 data notifications (initial + heartbeats), got {len(data_responses)}"
     )
+
+
+def test_subscribe_allow_aggregation(gnmi_stub):
+    """Subscribe STREAM SAMPLE with allow_aggregation=True.
+
+    Equivalent to: "Subscribe SAMPLE allow_aggregation" [subs-aggregation]
+    With two paths and the same interval, the server should combine
+    updates from both paths into fewer notifications.
+    """
+    path_a = xpath_to_path("/gnmi-server-test:test-state/things[name='A']")
+    path_b = xpath_to_path("/gnmi-server-test:test-state/things[name='B']")
+    subs = [
+        gnmi_pb2.Subscription(
+            path=path_a,
+            mode=gnmi_pb2.SubscriptionMode.SAMPLE,
+            sample_interval=500_000_000,  # 500ms
+        ),
+        gnmi_pb2.Subscription(
+            path=path_b,
+            mode=gnmi_pb2.SubscriptionMode.SAMPLE,
+            sample_interval=500_000_000,  # 500ms
+        ),
+    ]
+    sl = gnmi_pb2.SubscriptionList(
+        subscription=subs,
+        mode=gnmi_pb2.SubscriptionList.STREAM,
+        encoding=gnmi_pb2.JSON_IETF,
+        allow_aggregation=True,
+    )
+    req = gnmi_pb2.SubscribeRequest(subscribe=sl)
+
+    responses = []
+    try:
+        stream = gnmi_stub.Subscribe(iter([req]), timeout=4)
+        for resp in stream:
+            responses.append(resp)
+    except grpc.RpcError:
+        pass
+
+    # With aggregation, some data notifications should contain updates
+    # for BOTH paths in a single message
+    data_responses = [r for r in responses if r.HasField("update")]
+    multi_update = [r for r in data_responses if len(r.update.update) >= 2]
+    assert len(multi_update) >= 1, (
+        f"Expected at least one aggregated notification with >=2 updates, "
+        f"got {[len(r.update.update) for r in data_responses]}"
+    )
