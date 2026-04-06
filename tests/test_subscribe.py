@@ -920,17 +920,17 @@ def test_subscribe_on_change_slow_client(gnmi_stub):
     assert any(r.sync_response for r in responses)
 
 
-def test_subscribe_once_another_encoding_neg(gnmi_stub):
-    """Subscribe (once) with another unsupported encoding type.
+def test_subscribe_once_proto_encoding(gnmi_stub):
+    """Subscribe (once) with PROTO encoding.
 
-    Equivalent to: "Subscribe (once) with another unsupported encoding type" [subs-neg]
+    Equivalent to: "Subscribe (once) with PROTO encoding" [subs-encoding]
+    PROTO encoding uses native TypedValue fields for leaves.
     """
     path = xpath_to_path("/gnmi-server-test:test-state")
     req = _make_subscribe_once([path], encoding=gnmi_pb2.PROTO)
 
-    with pytest.raises(grpc.RpcError) as exc_info:
-        list(gnmi_stub.Subscribe(iter([req]), timeout=5))
-    assert exc_info.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+    responses = list(gnmi_stub.Subscribe(iter([req]), timeout=5))
+    assert any(r.sync_response for r in responses)
 
 
 def test_subscribe_on_change_with_delete(gnmi_stub):

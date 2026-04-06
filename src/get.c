@@ -203,7 +203,8 @@ grpc_status_code handle_get(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
   /* Validate encoding */
   if (req->encoding != GNMI__ENCODING__JSON_IETF &&
       req->encoding != GNMI__ENCODING__JSON &&
-      req->encoding != GNMI__ENCODING__ASCII) {
+      req->encoding != GNMI__ENCODING__ASCII &&
+      req->encoding != GNMI__ENCODING__PROTO) {
     *status_msg = strdup("Unsupported encoding");
     ret = GRPC_STATUS_UNIMPLEMENTED;
     goto cleanup;
@@ -274,12 +275,15 @@ cleanup:
           free(u->path);
         }
         if (u->val) {
-          if (u->val->value_case ==
-              GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL)
-            free(u->val->json_ietf_val.data);
-          else if (u->val->value_case ==
-              GNMI__TYPED_VALUE__VALUE_ASCII_VAL)
-            free(u->val->ascii_val);
+          switch (u->val->value_case) {
+          case GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL:
+            free(u->val->json_ietf_val.data); break;
+          case GNMI__TYPED_VALUE__VALUE_ASCII_VAL:
+            free(u->val->ascii_val); break;
+          case GNMI__TYPED_VALUE__VALUE_STRING_VAL:
+            free(u->val->string_val); break;
+          default: break;
+          }
           free(u->val);
         }
         free(u);

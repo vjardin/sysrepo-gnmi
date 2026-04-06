@@ -9,10 +9,12 @@
 #include "log.h"
 #include "compat.h"
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <libyang/in.h>
+#include <libyang/tree_schema.h>
 #include <cjson/cJSON.h>
 
 /* - JSON unwrap helpers ---------------------------------------------- */
@@ -197,6 +199,59 @@ grpc_status_code encode_node(Gnmi__Encoding encoding, const struct lyd_node *nod
     val->value_case = GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL;
     val->json_ietf_val.data = (uint8_t *)json;
     val->json_ietf_val.len = strlen(json);
+    return GRPC_STATUS_OK;
+  }
+
+  case GNMI__ENCODING__PROTO: {
+    /* PROTO encoding: use native TypedValue fields for leaves based on
+     * YANG type; fall back to json_ietf_val for containers/lists. */
+    gnmi__typed_value__init(val);
+    if (node->schema &&
+        (node->schema->nodetype & (LYS_LEAF | LYS_LEAFLIST))) {
+      const char *str_val = lyd_get_value(node);
+      LY_DATA_TYPE bt = ((struct lysc_node_leaf *)node->schema)->type->basetype;
+      switch (bt) {
+      case LY_TYPE_BOOL:
+        val->value_case = GNMI__TYPED_VALUE__VALUE_BOOL_VAL;
+        val->bool_val = (str_val && strcmp(str_val, "true") == 0);
+        break;
+      case LY_TYPE_INT8:
+      case LY_TYPE_INT16:
+      case LY_TYPE_INT32:
+      case LY_TYPE_INT64:
+        val->value_case = GNMI__TYPED_VALUE__VALUE_INT_VAL;
+        val->int_val = str_val ? strtoll(str_val, NULL, 10) : 0;
+        break;
+      case LY_TYPE_UINT8:
+      case LY_TYPE_UINT16:
+      case LY_TYPE_UINT32:
+      case LY_TYPE_UINT64:
+        val->value_case = GNMI__TYPED_VALUE__VALUE_UINT_VAL;
+        val->uint_val = str_val ? strtoull(str_val, NULL, 10) : 0;
+        break;
+      case LY_TYPE_DEC64:
+        val->value_case = GNMI__TYPED_VALUE__VALUE_FLOAT_VAL;
+        val->float_val = str_val ? strtof(str_val, NULL) : 0.0f;
+        break;
+      case LY_TYPE_EMPTY:
+        val->value_case = GNMI__TYPED_VALUE__VALUE_BOOL_VAL;
+        val->bool_val = true;
+        break;
+      default:
+        /* STRING, ENUM, IDENT, BINARY, BITS, LEAFREF, UNION, INST */
+        val->value_case = GNMI__TYPED_VALUE__VALUE_STRING_VAL;
+        val->string_val = strdup(str_val ? str_val : "");
+        break;
+      }
+    } else {
+      /* Container/list: use json_ietf_val as compact representation */
+      char *json = encode_json_ietf(node);
+      if (!json)
+        return GRPC_STATUS_INTERNAL;
+      val->value_case = GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL;
+      val->json_ietf_val.data = (uint8_t *)json;
+      val->json_ietf_val.len = strlen(json);
+    }
     return GRPC_STATUS_OK;
   }
 

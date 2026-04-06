@@ -1337,3 +1337,5 @@ def test_set_wildcard_in_update(gnmi_stub):
     with pytest.raises(grpc.RpcError) as exc_info:
         gnmi_stub.Set(req, timeout=5)
     assert exc_info.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+
+

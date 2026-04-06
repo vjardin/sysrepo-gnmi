@@ -774,3 +774,59 @@ def test_get_ascii_encoding_container(gnmi_stub):
     val = resp.notification[0].update[0].val
     # Container should have a non-empty text representation
     assert len(val.ascii_val) > 0
+
+
+def test_get_proto_encoding_leaf(gnmi_stub):
+    """Get a leaf with PROTO encoding.
+
+    Equivalent to: "Get with PROTO encoding (leaf)" [get-proto]
+    PROTO encoding maps YANG leaf types to native TypedValue fields.
+    """
+    # Create a string leaf
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        update=[gnmi_pb2.Update(
+            path=xpath_to_path(
+                "/gnmi-server-test:test/things[name='ProtoTest']/description"
+            ),
+            val=gnmi_pb2.TypedValue(json_ietf_val=b'"proto-val"'),
+        )],
+    ), timeout=5)
+
+    path = xpath_to_path(
+        "/gnmi-server-test:test/things[name='ProtoTest']/description"
+    )
+    req = gnmi_pb2.GetRequest(
+        path=[path],
+        type=gnmi_pb2.GetRequest.CONFIG,
+        encoding=gnmi_pb2.PROTO,
+    )
+    resp = gnmi_stub.Get(req, timeout=10)
+    assert len(resp.notification) == 1
+    assert len(resp.notification[0].update) == 1
+    val = resp.notification[0].update[0].val
+    # String leaf should use string_val
+    assert val.string_val == "proto-val"
+
+    # Cleanup
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        delete=[xpath_to_path("/gnmi-server-test:test/things[name='ProtoTest']")],
+    ), timeout=5)
+
+
+def test_get_proto_encoding_container(gnmi_stub):
+    """Get a container with PROTO encoding.
+
+    Equivalent to: "Get with PROTO encoding (container)" [get-proto]
+    Containers fall back to json_ietf_val in PROTO encoding.
+    """
+    path = xpath_to_path("/gnmi-server-test:test-state")
+    req = gnmi_pb2.GetRequest(
+        path=[path],
+        encoding=gnmi_pb2.PROTO,
+    )
+    resp = gnmi_stub.Get(req, timeout=10)
+    assert len(resp.notification) == 1
+    assert len(resp.notification[0].update) >= 1
+    val = resp.notification[0].update[0].val
+    # Container should fall back to json_ietf_val
+    assert len(val.json_ietf_val) > 0
