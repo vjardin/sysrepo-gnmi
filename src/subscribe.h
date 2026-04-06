@@ -40,10 +40,18 @@ struct sub_entry {
   /* SAMPLE: libevent timer on the shared event_base */
   struct event            *ev_timer;
 
+  /* SAMPLE: suppress_redundant -- skip notifications if data unchanged */
+  bool                     suppress_redundant;
+  char                    *last_json;  /* previous serialized value, or NULL */
+
   /* ON_CHANGE: sysrepo subscription + libevent wakeup event */
   sr_subscription_ctx_t   *sr_sub;
   struct event            *ev_change;
   sr_session_ctx_t        *change_sess; /* stashed from callback */
+
+  /* ON_CHANGE: heartbeat_interval -- periodic liveness notification */
+  uint64_t                 heartbeat_ns;
+  struct event            *ev_heartbeat;
 };
 
 struct stream_ctx {

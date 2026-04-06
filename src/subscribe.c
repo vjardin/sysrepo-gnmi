@@ -580,6 +580,9 @@ static int on_sr_change_cb(sr_session_ctx_t *session, uint32_t sub_id, const cha
           sr_event_t event, uint32_t request_id,
           void *private_data);
 
+static void ns_to_timeval(uint64_t ns, struct timeval *tv);
+static void on_heartbeat_timer(evutil_socket_t fd, short what, void *arg);
+
 static void stream_arm_subscriptions(struct stream_ctx *sctx)
 {
   Gnmi__SubscriptionList *sl = sctx->orig_req->subscribe;
@@ -605,24 +608,22 @@ static void stream_arm_subscriptions(struct stream_ctx *sctx)
     e->xpath = gnmi_merge_xpath(sl->prefix, sub->path, NULL);
     e->mode = sub->mode;
     e->sample_interval_ns = sub->sample_interval;
+    e->suppress_redundant = sub->suppress_redundant;
+    e->heartbeat_ns = sub->heartbeat_interval;
 
     if (sub->mode == GNMI__SUBSCRIPTION_MODE__SAMPLE &&
         e->sample_interval_ns > 0) {
       /* SAMPLE: create evtimer */
       e->ev_timer = evtimer_new(evbase, on_sample_timer, e);
-      /* Store back-pointer to stream_ctx */
-      /* We use a trick: ev_timer's arg is sub_entry,
-       * and sub_entry is in sctx->entries array,
-       * so we can compute sctx from the entry pointer. */
 
       struct timeval tv;
-      tv.tv_sec = e->sample_interval_ns / NSEC_PER_SEC;
-      tv.tv_usec = (e->sample_interval_ns % NSEC_PER_SEC) / NSEC_PER_USEC;
+      ns_to_timeval(e->sample_interval_ns, &tv);
       evtimer_add(e->ev_timer, &tv);
 
       gnmi_log(GNMI_LOG_DEBUG, "Subscribe STREAM: SAMPLE timer for %s "
-         "(interval %lu ns)",
-         e->xpath, (unsigned long)e->sample_interval_ns);
+         "(interval %lu ns, suppress_redundant=%d)",
+         e->xpath, (unsigned long)e->sample_interval_ns,
+         e->suppress_redundant);
     } else {
       /* ON_CHANGE (or TARGET_DEFINED -> treat as ON_CHANGE):
        * subscribe via sysrepo, wake main loop on changes */
@@ -649,6 +650,17 @@ static void stream_arm_subscriptions(struct stream_ctx *sctx)
            "(module=%s)", e->xpath, module);
       }
       free(module);
+
+      /* Heartbeat timer for ON_CHANGE (gNMI 0.7.0 s3.5.1.5.3):
+       * periodically send current value as a liveness signal. */
+      if (e->heartbeat_ns > 0) {
+        e->ev_heartbeat = evtimer_new(evbase, on_heartbeat_timer, e);
+        struct timeval hb_tv;
+        ns_to_timeval(e->heartbeat_ns, &hb_tv);
+        evtimer_add(e->ev_heartbeat, &hb_tv);
+        gnmi_log(GNMI_LOG_DEBUG, "Subscribe STREAM: heartbeat for %s "
+           "(interval %lu ns)", e->xpath, (unsigned long)e->heartbeat_ns);
+      }
     }
   }
 
@@ -697,6 +709,21 @@ static void stream_queue_sample(struct stream_ctx *sctx, struct sub_entry *e)
       ly_set_free(set, NULL);
     sr_release_data(sr_data);
     return;
+  }
+
+  /* suppress_redundant: serialize to JSON and compare with previous.
+   * If identical, skip the notification (gNMI 0.7.0 s3.5.1.5.2). */
+  if (e->suppress_redundant) {
+    char *json = NULL;
+    lyd_print_mem(&json, set->dnodes[0], LYD_JSON, LYD_PRINT_SHRINK);
+    if (json && e->last_json && strcmp(json, e->last_json) == 0) {
+      free(json);
+      ly_set_free(set, NULL);
+      sr_release_data(sr_data);
+      return;
+    }
+    free(e->last_json);
+    e->last_json = json;
   }
 
   /* Build notification with updates */
@@ -754,6 +781,38 @@ static void stream_try_send(struct stream_ctx *sctx)
   stream_send_next(sctx);
 }
 
+static void ns_to_timeval(uint64_t ns, struct timeval *tv)
+{
+  tv->tv_sec = ns / NSEC_PER_SEC;
+  tv->tv_usec = (ns % NSEC_PER_SEC) / NSEC_PER_USEC;
+}
+
+/* Heartbeat timer callback for ON_CHANGE subscriptions (gNMI 0.7.0 s3.5.1.5.3).
+ * Sends the current value periodically as a liveness signal even when nothing
+ * changed.  Reset whenever a real ON_CHANGE notification is sent. */
+static void on_heartbeat_timer(evutil_socket_t fd, short what, void *arg)
+{
+  (void)fd; (void)what;
+  struct sub_entry *e = arg;
+  struct stream_ctx *sctx = e->sctx;
+
+  if (gnmi_server_is_shutting_down(sctx->base.srv))
+    return;
+  if (sctx->state != STREAM_ACTIVE)
+    return;
+
+  gnmi_log(GNMI_LOG_DEBUG, "Heartbeat timer fired for %s", e->xpath);
+
+  /* Send current state as a full sample */
+  stream_queue_sample(sctx, e);
+  stream_try_send(sctx);
+
+  /* Re-arm */
+  struct timeval tv;
+  ns_to_timeval(e->heartbeat_ns, &tv);
+  evtimer_add(e->ev_heartbeat, &tv);
+}
+
 /* SAMPLE timer callback - fires on the main libevent loop */
 static void on_sample_timer(evutil_socket_t fd, short what, void *arg)
 {
@@ -779,8 +838,7 @@ static void on_sample_timer(evutil_socket_t fd, short what, void *arg)
 
   /* Re-arm the timer */
   struct timeval tv;
-  tv.tv_sec = e->sample_interval_ns / NSEC_PER_SEC;
-  tv.tv_usec = (e->sample_interval_ns % NSEC_PER_SEC) / NSEC_PER_USEC;
+  ns_to_timeval(e->sample_interval_ns, &tv);
   evtimer_add(e->ev_timer, &tv);
 
   /* Try to send */
@@ -933,6 +991,13 @@ static void on_change_event(evutil_socket_t fd, short what, void *arg)
   stream_queue_delta(sctx, e);
   e->change_sess = NULL;
 
+  /* Reset heartbeat timer on real change (gNMI 0.7.0 s3.5.1.5.3) */
+  if (e->ev_heartbeat && e->heartbeat_ns > 0) {
+    struct timeval hb_tv;
+    ns_to_timeval(e->heartbeat_ns, &hb_tv);
+    evtimer_add(e->ev_heartbeat, &hb_tv);
+  }
+
   stream_try_send(sctx);
 }
 
@@ -1002,6 +1067,11 @@ static void stream_free(struct stream_ctx *sctx)
       event_del(e->ev_change);
       event_free(e->ev_change);
     }
+    if (e->ev_heartbeat) {
+      evtimer_del(e->ev_heartbeat);
+      event_free(e->ev_heartbeat);
+    }
+    free(e->last_json);
     free(e->xpath);
   }
   free(sctx->entries);

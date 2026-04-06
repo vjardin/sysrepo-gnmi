@@ -1347,3 +1347,86 @@ def test_subscribe_stream_updates_only(gnmi_stub):
     # depending on timing (ON_CHANGE delivery is asynchronous)
     assert len(responses) >= 1
     assert responses[0].sync_response is True
+
+
+def test_subscribe_sample_suppress_redundant(gnmi_stub):
+    """Subscribe SAMPLE with suppress_redundant=True.
+
+    Equivalent to: "Subscribe SAMPLE suppress_redundant" [subs-suppress]
+    Server omits notifications when data has not changed since last sample.
+    """
+    import threading
+
+    path = xpath_to_path("/gnmi-server-test:test-state/things[name='A']")
+    subs = [gnmi_pb2.Subscription(
+        path=path,
+        mode=gnmi_pb2.SubscriptionMode.SAMPLE,
+        sample_interval=500_000_000,  # 500ms
+        suppress_redundant=True,
+    )]
+    sl = gnmi_pb2.SubscriptionList(
+        subscription=subs,
+        mode=gnmi_pb2.SubscriptionList.STREAM,
+        encoding=gnmi_pb2.JSON_IETF,
+    )
+    req = gnmi_pb2.SubscribeRequest(subscribe=sl)
+
+    responses = []
+    try:
+        stream = gnmi_stub.Subscribe(iter([req]), timeout=4)
+        for resp in stream:
+            responses.append(resp)
+    except grpc.RpcError:
+        pass
+
+    # With 500ms interval over 4s, without suppress_redundant we'd get
+    # ~8 data notifications + sync.  With suppress_redundant and static
+    # data, we should get fewer (initial data + sync + maybe 1 redundant
+    # before suppression kicks in).
+    data_responses = [r for r in responses if r.HasField("update")]
+    sync_responses = [r for r in responses if r.sync_response]
+    assert len(sync_responses) >= 1
+    # Key assertion: far fewer than 8 data notifications
+    assert len(data_responses) <= 3, (
+        f"Expected <=3 data notifications with suppress_redundant, got {len(data_responses)}"
+    )
+
+
+def test_subscribe_on_change_heartbeat(gnmi_stub):
+    """Subscribe ON_CHANGE with heartbeat_interval.
+
+    Equivalent to: "Subscribe ON_CHANGE heartbeat" [subs-heartbeat]
+    Server sends periodic liveness notifications even without changes.
+    """
+    import threading
+
+    path = xpath_to_path("/gnmi-server-test:test-state/things[name='A']")
+    subs = [gnmi_pb2.Subscription(
+        path=path,
+        mode=gnmi_pb2.SubscriptionMode.ON_CHANGE,
+        heartbeat_interval=1_000_000_000,  # 1 second
+    )]
+    sl = gnmi_pb2.SubscriptionList(
+        subscription=subs,
+        mode=gnmi_pb2.SubscriptionList.STREAM,
+        encoding=gnmi_pb2.JSON_IETF,
+    )
+    req = gnmi_pb2.SubscribeRequest(subscribe=sl)
+
+    responses = []
+    try:
+        stream = gnmi_stub.Subscribe(iter([req]), timeout=4)
+        for resp in stream:
+            responses.append(resp)
+    except grpc.RpcError:
+        pass
+
+    # Should get: initial data + sync + at least 2 heartbeat notifications
+    # (1s heartbeat over ~3.5s after sync)
+    data_responses = [r for r in responses if r.HasField("update")]
+    sync_responses = [r for r in responses if r.sync_response]
+    assert len(sync_responses) >= 1
+    # Initial data + at least 2 heartbeats
+    assert len(data_responses) >= 3, (
+        f"Expected >=3 data notifications (initial + heartbeats), got {len(data_responses)}"
+    )
