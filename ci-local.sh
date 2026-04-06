@@ -48,6 +48,9 @@ for V in $VERSIONS; do
             cd /src && tar cf - --exclude=builddir --exclude=.venv --exclude=__pycache__ . | tar xf - -C /build/src
             cd /build/src
 
+            # Create NACM test user (sysrepo needs a real system user)
+            useradd -r -s /usr/sbin/nologin nacmtestuser 2>/dev/null || true
+
             # Download subprojects
             git config --global --add safe.directory '*'
             meson subprojects download || true
@@ -55,6 +58,9 @@ for V in $VERSIONS; do
             # Build
             meson setup builddir -Dcesnet_version=$V -Dsanitize=$S
             meson compile -C builddir
+
+            # Allow nacmtestuser to access sysrepo data
+            chmod -R 777 builddir/deps builddir/test_repo 2>/dev/null || true
 
             # Setup Python
             python3 -m venv .venv

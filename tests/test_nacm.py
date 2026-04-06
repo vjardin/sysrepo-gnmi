@@ -102,10 +102,29 @@ def nacm_server(nacm_env, nacm_setup, seed_oper):
     if not os.path.isfile(binary):
         pytest.skip(f"gnmi_server binary not found: {binary}")
 
+    # sysrepo NACM requires the user to exist in /etc/passwd
+    try:
+        import pwd
+        pwd.getpwnam(NACM_USER)
+    except KeyError:
+        if os.getuid() == 0:
+            subprocess.run(
+                ["useradd", "-r", "-s", "/usr/sbin/nologin", NACM_USER],
+                check=False,
+            )
+        else:
+            pytest.skip(f"System user '{NACM_USER}' does not exist (create it or run as root)")
+
     log_path = os.path.join(build_dir, "gnmi_server_nacm.log")
     log_file = open(log_path, "w")
 
+    # sysrepo bypasses NACM for the recovery user (root).  Run the
+    # NACM server process as nacmtestuser so enforcement applies.
     cmd = [binary, "-f", "-b", NACM_BIND, "-l", "4", "-u", NACM_USER]
+    run_as_user = os.getuid() == 0
+    if run_as_user:
+        cmd = ["runuser", "-u", NACM_USER, "--"] + cmd
+
     proc = subprocess.Popen(cmd, env=env, stdout=log_file, stderr=log_file)
 
     host, port = NACM_BIND.split(":")
@@ -151,7 +170,6 @@ def test_nacm_read_permitted(nacm_stub):
     assert len(resp.notification) == 1
 
 
-@pytest.mark.skipif(os.getuid() != 0, reason="NACM enforcement requires root")
 def test_nacm_write_denied(nacm_stub):
     """NACM: write access is denied by rule.
 
@@ -174,7 +192,6 @@ def test_nacm_write_denied(nacm_stub):
     )
 
 
-@pytest.mark.skipif(os.getuid() != 0, reason="NACM enforcement requires root")
 def test_nacm_exec_denied(nacm_stub):
     """NACM: exec (RPC) access is denied by rule.
 

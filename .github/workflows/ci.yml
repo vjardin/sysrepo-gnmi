@@ -70,6 +70,8 @@ jobs:
             libprotobuf-c-dev protobuf-c-compiler \
             libevent-dev libcjson-dev libpcre2-dev \
             python3-venv
+      - name: Create NACM test user
+        run: sudo useradd -r -s /usr/sbin/nologin nacmtestuser 2>/dev/null || true
       - name: Download meson subprojects
         run: meson subprojects download || true
       - name: Build (${{ matrix.sanitizer }}, ${{ matrix.cesnet_version }})
@@ -88,6 +90,8 @@ jobs:
           .venv/bin/python -m grpc_tools.protoc \
             -Iproto --python_out=tests/proto --grpc_python_out=tests/proto \
             proto/gnmi.proto proto/gnmi_ext.proto
+      - name: Fix permissions for NACM tests
+        run: chmod -R 777 builddir/deps builddir/test_repo 2>/dev/null || true
       - name: Run tests
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/builddir/deps/lib
@@ -96,7 +100,7 @@ jobs:
           no_proxy: localhost,127.0.0.1
           ASAN_OPTIONS: detect_leaks=0
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
-        run: .venv/bin/pytest tests/ -v --tb=short
+        run: sudo -E .venv/bin/pytest tests/ -v --tb=short
 
   deb:
     runs-on: ubuntu-latest
