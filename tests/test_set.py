@@ -1397,3 +1397,156 @@ def test_set_replace_removes_absent_children(gnmi_stub):
     gnmi_stub.Set(gnmi_pb2.SetRequest(
         delete=[xpath_to_path("/gnmi-server-test:test2")],
     ), timeout=5)
+
+
+def test_set_candidate_datastore(gnmi_stub):
+    """Set to candidate, verify not in running, commit, verify in running.
+
+    Equivalent to: "Set candidate datastore" [set-candidate]
+    """
+    desc_path = xpath_to_path(
+        "/gnmi-server-test:test/things[name='CandTest']/description"
+    )
+    cand_prefix = gnmi_pb2.Path(target="candidate")
+
+    # Edit candidate
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        prefix=cand_prefix,
+        update=[gnmi_pb2.Update(
+            path=desc_path,
+            val=gnmi_pb2.TypedValue(json_ietf_val=b'"in-candidate"'),
+        )],
+    ), timeout=5)
+
+    # Verify NOT in running
+    resp = gnmi_stub.Get(gnmi_pb2.GetRequest(
+        path=[xpath_to_path("/gnmi-server-test:test/things[name='CandTest']")],
+        type=gnmi_pb2.GetRequest.CONFIG,
+        encoding=gnmi_pb2.JSON_IETF,
+    ), timeout=5)
+    assert len(resp.notification[0].update) == 0, \
+        "Candidate edit should not be visible in running"
+
+    # Verify IS in candidate
+    resp = gnmi_stub.Get(gnmi_pb2.GetRequest(
+        prefix=gnmi_pb2.Path(target="candidate"),
+        path=[xpath_to_path("/gnmi-server-test:test/things[name='CandTest']")],
+        encoding=gnmi_pb2.JSON_IETF,
+    ), timeout=5)
+    assert len(resp.notification[0].update) >= 1, \
+        "Candidate edit should be visible in candidate DS"
+
+    # Commit candidate to running
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        prefix=gnmi_pb2.Path(target="commit-candidate"),
+    ), timeout=5)
+
+    # Verify now in running
+    resp = gnmi_stub.Get(gnmi_pb2.GetRequest(
+        path=[xpath_to_path("/gnmi-server-test:test/things[name='CandTest']")],
+        type=gnmi_pb2.GetRequest.CONFIG,
+        encoding=gnmi_pb2.JSON_IETF,
+    ), timeout=5)
+    assert len(resp.notification[0].update) >= 1, \
+        "After commit, data should be visible in running"
+
+    # Cleanup
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        delete=[xpath_to_path("/gnmi-server-test:test/things[name='CandTest']")],
+    ), timeout=5)
+
+
+def test_set_candidate_discard(gnmi_stub):
+    """Edit candidate then discard -- running unchanged.
+
+    Equivalent to: "Set candidate discard" [set-candidate]
+    """
+    desc_path = xpath_to_path(
+        "/gnmi-server-test:test/things[name='DiscardTest']/description"
+    )
+
+    # Edit candidate
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        prefix=gnmi_pb2.Path(target="candidate"),
+        update=[gnmi_pb2.Update(
+            path=desc_path,
+            val=gnmi_pb2.TypedValue(json_ietf_val=b'"will-discard"'),
+        )],
+    ), timeout=5)
+
+    # Discard
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        prefix=gnmi_pb2.Path(target="discard-candidate"),
+    ), timeout=5)
+
+    # Verify NOT in running
+    resp = gnmi_stub.Get(gnmi_pb2.GetRequest(
+        path=[xpath_to_path("/gnmi-server-test:test/things[name='DiscardTest']")],
+        type=gnmi_pb2.GetRequest.CONFIG,
+        encoding=gnmi_pb2.JSON_IETF,
+    ), timeout=5)
+    assert len(resp.notification[0].update) == 0, \
+        "After discard, data should not be in running"
+
+
+def test_set_candidate_multi_step(gnmi_stub):
+    """Multiple Set(candidate) calls, then single commit.
+
+    Equivalent to: "Set candidate multi-step" [set-candidate]
+    """
+    cand_prefix = gnmi_pb2.Path(target="candidate")
+
+    # Step 1: create first entry
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        prefix=cand_prefix,
+        update=[gnmi_pb2.Update(
+            path=xpath_to_path(
+                "/gnmi-server-test:test/things[name='Multi1']/description"
+            ),
+            val=gnmi_pb2.TypedValue(json_ietf_val=b'"first"'),
+        )],
+    ), timeout=5)
+
+    # Step 2: create second entry
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        prefix=cand_prefix,
+        update=[gnmi_pb2.Update(
+            path=xpath_to_path(
+                "/gnmi-server-test:test/things[name='Multi2']/description"
+            ),
+            val=gnmi_pb2.TypedValue(json_ietf_val=b'"second"'),
+        )],
+    ), timeout=5)
+
+    # Neither should be in running yet
+    for name in ["Multi1", "Multi2"]:
+        resp = gnmi_stub.Get(gnmi_pb2.GetRequest(
+            path=[xpath_to_path(f"/gnmi-server-test:test/things[name='{name}']")],
+            type=gnmi_pb2.GetRequest.CONFIG,
+            encoding=gnmi_pb2.JSON_IETF,
+        ), timeout=5)
+        assert len(resp.notification[0].update) == 0, \
+            f"{name} should not be in running before commit"
+
+    # Commit
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        prefix=gnmi_pb2.Path(target="commit-candidate"),
+    ), timeout=5)
+
+    # Both should now be in running
+    for name in ["Multi1", "Multi2"]:
+        resp = gnmi_stub.Get(gnmi_pb2.GetRequest(
+            path=[xpath_to_path(f"/gnmi-server-test:test/things[name='{name}']")],
+            type=gnmi_pb2.GetRequest.CONFIG,
+            encoding=gnmi_pb2.JSON_IETF,
+        ), timeout=5)
+        assert len(resp.notification[0].update) >= 1, \
+            f"{name} should be in running after commit"
+
+    # Cleanup
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        delete=[
+            xpath_to_path("/gnmi-server-test:test/things[name='Multi1']"),
+            xpath_to_path("/gnmi-server-test:test/things[name='Multi2']"),
+        ],
+    ), timeout=5)

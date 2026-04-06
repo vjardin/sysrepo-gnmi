@@ -11,6 +11,7 @@
 #include "encode.h"
 #include "log.h"
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -18,6 +19,50 @@
 #include <libyang/libyang.h>
 
 #include "gnmi.pb-c.h"
+
+/* - Candidate datastore session (persistent, locked) -------------- */
+/*
+ * Mirrors how netopeer2 handles candidate: a persistent sysrepo session
+ * is created and locked on first Set(target=candidate).  The lock keeps
+ * candidate independent from running.  Edits accumulate in candidate
+ * across multiple Set RPCs.  commit-candidate copies to running and
+ * releases the session.  discard-candidate discards and releases.
+ * sr_unlock() resets candidate to mirror running automatically.
+ */
+
+static sr_session_ctx_t *candidate_sess;
+
+static sr_session_ctx_t *candidate_acquire(sr_conn_ctx_t *conn)
+{
+  if (candidate_sess)
+    return candidate_sess;
+
+  int rc = sr_session_start(conn, SR_DS_CANDIDATE, &candidate_sess);
+  if (rc != SR_ERR_OK)
+    return NULL;
+
+  rc = sr_lock(candidate_sess, NULL, 0);
+  if (rc != SR_ERR_OK) {
+    gnmi_log(GNMI_LOG_ERROR, "Candidate: sr_lock failed: %s", sr_strerror(rc));
+    sr_session_stop(candidate_sess);
+    candidate_sess = NULL;
+    return NULL;
+  }
+
+  gnmi_log(GNMI_LOG_DEBUG, "Candidate: session created and locked");
+  return candidate_sess;
+}
+
+static void candidate_release(void)
+{
+  if (!candidate_sess)
+    return;
+  /* sr_unlock resets candidate to mirror running */
+  sr_unlock(candidate_sess, NULL);
+  sr_session_stop(candidate_sess);
+  candidate_sess = NULL;
+  gnmi_log(GNMI_LOG_DEBUG, "Candidate: session unlocked and released");
+}
 
 /* - Result tracking ----------------------------------------------- */
 
@@ -253,6 +298,8 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
   sr_session_ctx_t *sess = NULL;
   struct edit_batch eb;
   grpc_status_code ret = GRPC_STATUS_INTERNAL;
+  bool use_candidate = false;
+  char *prefix_xpath = NULL;
 
   edit_batch_init(&eb);
 
@@ -273,15 +320,74 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
            req->n_delete_, req->n_replace, req->n_update);
   results = calloc(max_results ? max_results : 1, sizeof(*results));
 
-  /* Create session (with NACM user if configured) */
-  int rc = gnmi_nacm_session_start(sr_conn, SR_DS_RUNNING, &sess);
-  if (rc != SR_ERR_OK) {
-    *status_msg = strdup("Failed to start sysrepo session");
+  /* Candidate datastore dispatch via prefix target */
+  const char *target = (req->prefix && req->prefix->target) ?
+    req->prefix->target : "";
+  use_candidate = (strcmp(target, "candidate") == 0);
+
+  /* commit-candidate: copy candidate to running, then release.
+   * sr_copy_config(sess, mod, src_ds, timeout) copies FROM src_ds
+   * INTO the session's current DS.  So we need a running session
+   * and copy FROM candidate. */
+  if (strcmp(target, "commit-candidate") == 0) {
+    if (!candidate_sess) {
+      *status_msg = strdup("No candidate session to commit");
+      ret = GRPC_STATUS_FAILED_PRECONDITION;
+      goto cleanup;
+    }
+    /* Switch the locked candidate session to running DS, then copy
+     * FROM candidate.  The lock holder can read candidate. */
+    sr_session_switch_ds(candidate_sess, SR_DS_RUNNING);
+    int crc = sr_copy_config(candidate_sess, NULL, SR_DS_CANDIDATE, 0);
+    sr_session_switch_ds(candidate_sess, SR_DS_CANDIDATE);
+    candidate_release();
+    if (crc != SR_ERR_OK) {
+      *status_msg = strdup(sr_strerror(crc));
+      ret = GRPC_STATUS_ABORTED;
+      goto cleanup;
+    }
+    /* Persist to startup */
+    sr_session_ctx_t *su = NULL;
+    if (sr_session_start(sr_conn, SR_DS_STARTUP, &su) == SR_ERR_OK) {
+      sr_copy_config(su, NULL, SR_DS_RUNNING, 0);
+      sr_session_stop(su);
+    }
+    gnmi_log(GNMI_LOG_INFO, "Candidate: committed to running");
+    resp.timestamp = get_time_nanosec();
+    *response_bb = gnmi_pack((ProtobufCMessage *)&resp);
+    ret = GRPC_STATUS_OK;
     goto cleanup;
   }
 
-  /* Declare before any goto cleanup */
-  char *prefix_xpath = NULL;
+  /* discard-candidate: discard changes and release */
+  if (strcmp(target, "discard-candidate") == 0) {
+    if (candidate_sess)
+      sr_discard_changes(candidate_sess);
+    candidate_release();
+    gnmi_log(GNMI_LOG_INFO, "Candidate: discarded");
+    resp.timestamp = get_time_nanosec();
+    *response_bb = gnmi_pack((ProtobufCMessage *)&resp);
+    ret = GRPC_STATUS_OK;
+    goto cleanup;
+  }
+
+  /* For candidate edits, use the persistent locked session */
+  int rc;
+  if (use_candidate) {
+    sess = candidate_acquire(sr_conn);
+    if (!sess) {
+      *status_msg = strdup("Failed to acquire candidate session");
+      ret = GRPC_STATUS_ABORTED;
+      goto cleanup;
+    }
+  } else {
+    /* Create session (with NACM user if configured) */
+    rc = gnmi_nacm_session_start(sr_conn, SR_DS_RUNNING, &sess);
+    if (rc != SR_ERR_OK) {
+      *status_msg = strdup("Failed to start sysrepo session");
+      goto cleanup;
+    }
+  }
 
   /* Check confirmed-commit state */
   confirm_state_t *cs = confirm_state_get_global();
@@ -368,8 +474,10 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
     goto cleanup;
   }
 
-  /* Persist to startup (skip if confirmed-commit - wait for Confirm RPC) */
-  if (has_confirm && cs) {
+  /* Persist to startup (skip for candidate and confirmed-commit) */
+  if (use_candidate) {
+    /* Candidate: changes stay in candidate until commit-candidate */
+  } else if (has_confirm && cs) {
     /* Timer already armed by confirm_state_snapshot above */
   } else {
     /* No confirm - persist to startup immediately */
@@ -428,7 +536,7 @@ cleanup:
 
   edit_batch_free(&eb);
 
-  if (sess)
+  if (sess && !use_candidate)
     sr_session_stop(sess);
   if (req)
     protobuf_c_message_free_unpacked((ProtobufCMessage *)req, NULL);

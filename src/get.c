@@ -167,8 +167,10 @@ build_get_notification(sr_session_ctx_t *sess, const Gnmi__Path *prefix, const G
 
   gnmi_log(GNMI_LOG_DEBUG, "Get path: %s", fullpath);
 
-  /* Datastore selection */
-  if (data_type == GNMI__GET_REQUEST__DATA_TYPE__CONFIG)
+  /* Datastore selection: target="candidate" overrides data_type */
+  if (prefix && prefix->target && strcmp(prefix->target, "candidate") == 0)
+    ds = SR_DS_CANDIDATE;
+  else if (data_type == GNMI__GET_REQUEST__DATA_TYPE__CONFIG)
     ds = SR_DS_RUNNING;
 
   /* Switch datastore (save + restore) */
