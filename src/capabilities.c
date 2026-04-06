@@ -28,8 +28,8 @@ grpc_status_code handle_capabilities(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *r
   Gnmi__CapabilityResponse resp = GNMI__CAPABILITY_RESPONSE__INIT;
   grpc_status_code ret = GRPC_STATUS_INTERNAL;
 
-  /* Create a temporary session */
-  int rc = sr_session_start(sr_conn, SR_DS_RUNNING, &sess);
+  /* Create a temporary session (with NACM user if configured) */
+  int rc = gnmi_nacm_session_start(sr_conn, SR_DS_RUNNING, &sess);
   if (rc != SR_ERR_OK) {
     *status_msg = strdup("Failed to start sysrepo session");
     return GRPC_STATUS_INTERNAL;

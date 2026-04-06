@@ -233,6 +233,9 @@ void gnmi_service_rearm(gnmi_server_t *srv, int method_idx)
   }
 }
 
+/* Global NACM user, set once at init from server config */
+static const char *nacm_user;
+
 /* - Init: register methods and arm -------------------------------- */
 
 int gnmi_service_init(gnmi_server_t *srv)
@@ -252,22 +255,37 @@ int gnmi_service_init(gnmi_server_t *srv)
     gnmi_log(GNMI_LOG_DEBUG, "Registered method: %s", methods[i].path);
   }
 
+  /* Store NACM user for session creation in RPC handlers */
+  extern const char *gnmi_server_get_nacm_user(gnmi_server_t *srv);
+  nacm_user = gnmi_server_get_nacm_user(srv);
+
   /* Must arm AFTER grpc_server_start, so we return and let
    * server.c call start, then arm. We'll arm in a post-start hook. */
   return 0;
 }
 
 /* Start a sysrepo session with NACM user if configured */
+
 int gnmi_session_start(gnmi_server_t *srv, sr_datastore_t ds, sr_session_ctx_t **sess)
 {
   int rc = sr_session_start(gnmi_server_get_sr_conn(srv), ds, sess);
   if (rc != SR_ERR_OK)
     return rc;
 
-  extern const char *gnmi_server_get_nacm_user(gnmi_server_t *srv);
-  const char *user = gnmi_server_get_nacm_user(srv);
-  if (user && user[0])
-    sr_session_set_user(*sess, user);
+  if (nacm_user && nacm_user[0])
+    sr_session_set_user(*sess, nacm_user);
+
+  return SR_ERR_OK;
+}
+
+int gnmi_nacm_session_start(sr_conn_ctx_t *conn, sr_datastore_t ds, sr_session_ctx_t **sess)
+{
+  int rc = sr_session_start(conn, ds, sess);
+  if (rc != SR_ERR_OK)
+    return rc;
+
+  if (nacm_user && nacm_user[0])
+    sr_session_set_user(*sess, nacm_user);
 
   return SR_ERR_OK;
 }

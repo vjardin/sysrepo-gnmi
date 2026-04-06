@@ -273,8 +273,8 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
            req->n_delete_, req->n_replace, req->n_update);
   results = calloc(max_results ? max_results : 1, sizeof(*results));
 
-  /* Create sessions */
-  int rc = sr_session_start(sr_conn, SR_DS_RUNNING, &sess);
+  /* Create session (with NACM user if configured) */
+  int rc = gnmi_nacm_session_start(sr_conn, SR_DS_RUNNING, &sess);
   if (rc != SR_ERR_OK) {
     *status_msg = strdup("Failed to start sysrepo session");
     goto cleanup;

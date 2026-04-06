@@ -663,3 +663,20 @@ def test_get_relative_path(gnmi_stub):
         gnmi_stub.Get(req, timeout=5)
     assert exc_info.value.code() == grpc.StatusCode.INVALID_ARGUMENT
     assert "Relative" in exc_info.value.details()
+
+
+def test_get_state_datatype(gnmi_stub):
+    """Get request with DataType STATE.
+
+    Equivalent to: "Get request with STATE datatype" [get-state]
+    STATE returns operational (non-config) data.
+    """
+    path = xpath_to_path("/gnmi-server-test:test-state")
+    req = gnmi_pb2.GetRequest(
+        path=[path],
+        type=gnmi_pb2.GetRequest.STATE,
+        encoding=gnmi_pb2.JSON_IETF,
+    )
+    resp = gnmi_stub.Get(req, timeout=10)
+    assert len(resp.notification) == 1
+    assert len(resp.notification[0].update) >= 1

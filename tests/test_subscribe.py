@@ -1057,13 +1057,17 @@ def test_subscribe_on_change_nonexistent(gnmi_stub):
     assert any(r.sync_response for r in responses)
 
 
-def test_subscribe_stream_updates_only_neg(gnmi_stub):
-    """Subscribe (stream) with updates_only - rejected.
+def test_subscribe_stream_updates_only_sync_only(gnmi_stub):
+    """Subscribe STREAM with updates_only sends sync without initial data.
 
-    Equivalent to: "Subscribe (stream) with updates_only" [subs-neg]
+    Equivalent to: "Subscribe (stream) with updates_only" [subs-updates-only]
+    The initial snapshot is suppressed; first message is sync_response.
     """
     path = xpath_to_path("/gnmi-server-test:test-state")
-    subs = [gnmi_pb2.Subscription(path=path)]
+    subs = [gnmi_pb2.Subscription(
+        path=path,
+        mode=gnmi_pb2.SubscriptionMode.ON_CHANGE,
+    )]
     sl = gnmi_pb2.SubscriptionList(
         subscription=subs,
         mode=gnmi_pb2.SubscriptionList.STREAM,
@@ -1072,9 +1076,19 @@ def test_subscribe_stream_updates_only_neg(gnmi_stub):
     )
     req = gnmi_pb2.SubscribeRequest(subscribe=sl)
 
-    with pytest.raises(grpc.RpcError) as exc_info:
-        list(gnmi_stub.Subscribe(iter([req]), timeout=5))
-    assert exc_info.value.code() == grpc.StatusCode.INVALID_ARGUMENT
+    responses = []
+    try:
+        stream = gnmi_stub.Subscribe(iter([req]), timeout=3)
+        for resp in stream:
+            responses.append(resp)
+            if resp.sync_response:
+                break
+    except grpc.RpcError:
+        pass
+
+    # First (and only immediate) response should be sync_response
+    assert len(responses) == 1
+    assert responses[0].sync_response is True
 
 
 def test_subscribe_stream_use_aliases_neg(gnmi_stub):
@@ -1232,3 +1246,104 @@ def test_subscribe_at_max_subscriptions(gnmi_stub):
 
     responses = list(gnmi_stub.Subscribe(iter([req]), timeout=30))
     assert any(r.sync_response for r in responses)
+
+
+def test_subscribe_once_updates_only(gnmi_stub):
+    """Subscribe ONCE with updates_only=True.
+
+    Equivalent to: "Subscribe (once) with updates_only" [subs-updates-only]
+    Server sends only sync_response, no initial data.
+    """
+    path = xpath_to_path("/gnmi-server-test:test-state")
+    subs = [gnmi_pb2.Subscription(path=path)]
+    sl = gnmi_pb2.SubscriptionList(
+        subscription=subs,
+        mode=gnmi_pb2.SubscriptionList.ONCE,
+        encoding=gnmi_pb2.JSON_IETF,
+        updates_only=True,
+    )
+    req = gnmi_pb2.SubscribeRequest(subscribe=sl)
+
+    responses = list(gnmi_stub.Subscribe(iter([req]), timeout=5))
+    # Should get only sync_response, no data notification
+    assert len(responses) == 1
+    assert responses[0].sync_response is True
+
+
+def test_subscribe_stream_updates_only(gnmi_stub):
+    """Subscribe STREAM ON_CHANGE with updates_only=True.
+
+    Equivalent to: "Subscribe (stream) with updates_only" [subs-updates-only]
+    Initial snapshot is suppressed; only sync + subsequent changes.
+    """
+    import threading
+
+    # Create data before subscribing
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        update=[gnmi_pb2.Update(
+            path=xpath_to_path(
+                "/gnmi-server-test:test/things[name='UpdOnly']/description"
+            ),
+            val=gnmi_pb2.TypedValue(json_ietf_val=b'"initial"'),
+        )],
+    ), timeout=5)
+
+    path = xpath_to_path("/gnmi-server-test:test/things[name='UpdOnly']")
+    subs = [gnmi_pb2.Subscription(
+        path=path,
+        mode=gnmi_pb2.SubscriptionMode.ON_CHANGE,
+    )]
+    sl = gnmi_pb2.SubscriptionList(
+        subscription=subs,
+        mode=gnmi_pb2.SubscriptionList.STREAM,
+        encoding=gnmi_pb2.JSON_IETF,
+        updates_only=True,
+    )
+
+    responses = []
+    got_sync = threading.Event()
+
+    def collect():
+        try:
+            stream = gnmi_stub.Subscribe(
+                iter([gnmi_pb2.SubscribeRequest(subscribe=sl)]),
+                timeout=5,
+            )
+            for resp in stream:
+                responses.append(resp)
+                if resp.sync_response:
+                    got_sync.set()
+                if len(responses) >= 5:
+                    break
+        except grpc.RpcError:
+            pass
+
+    t = threading.Thread(target=collect, daemon=True)
+    t.start()
+    got_sync.wait(timeout=5)
+    assert got_sync.is_set(), "Never got sync_response"
+
+    # First response should be sync (no initial data)
+    assert responses[0].sync_response is True
+
+    # Modify data to trigger ON_CHANGE
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        update=[gnmi_pb2.Update(
+            path=xpath_to_path(
+                "/gnmi-server-test:test/things[name='UpdOnly']/description"
+            ),
+            val=gnmi_pb2.TypedValue(json_ietf_val=b'"changed"'),
+        )],
+    ), timeout=5)
+
+    t.join(timeout=5)
+
+    # Cleanup
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        delete=[xpath_to_path("/gnmi-server-test:test/things[name='UpdOnly']")],
+    ), timeout=5)
+
+    # Must have sync_response; change notification may or may not arrive
+    # depending on timing (ON_CHANGE delivery is asynchronous)
+    assert len(responses) >= 1
+    assert responses[0].sync_response is True

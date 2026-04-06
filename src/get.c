@@ -4,6 +4,7 @@
  */
 
 #include "get.h"
+#include "gnmi_service.h"
 #include "xpath.h"
 #include "encode.h"
 #include "log.h"
@@ -189,15 +190,16 @@ grpc_status_code handle_get(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
     goto cleanup;
   }
 
-  /* Validate data_type */
+  /* All gNMI DataTypes accepted: ALL(0), CONFIG(1), STATE(2), OPERATIONAL(3).
+   * CONFIG maps to running DS; others use operational DS. */
   if (req->type > GNMI__GET_REQUEST__DATA_TYPE__OPERATIONAL) {
     *status_msg = strdup("Unsupported DataType");
     ret = GRPC_STATUS_UNIMPLEMENTED;
     goto cleanup;
   }
 
-  /* Create session */
-  int rc = sr_session_start(sr_conn, SR_DS_RUNNING, &sess);
+  /* Create session (with NACM user if configured) */
+  int rc = gnmi_nacm_session_start(sr_conn, SR_DS_RUNNING, &sess);
   if (rc != SR_ERR_OK) {
     *status_msg = strdup("Failed to start sysrepo session");
     goto cleanup;

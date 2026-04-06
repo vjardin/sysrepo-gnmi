@@ -240,19 +240,6 @@ validate_subscribe(Gnmi__SubscribeRequest *req, char **err_msg)
     }
   }
 
-  if (sl->mode == GNMI__SUBSCRIPTION_LIST__MODE__STREAM) {
-    if (sl->use_aliases) {
-      *err_msg = strdup(
-        "use_aliases not supported in STREAM mode");
-      return GRPC_STATUS_INVALID_ARGUMENT;
-    }
-    if (sl->updates_only) {
-      *err_msg = strdup(
-        "updates_only not supported in STREAM mode");
-      return GRPC_STATUS_INVALID_ARGUMENT;
-    }
-  }
-
   return GRPC_STATUS_OK;
 }
 
@@ -418,8 +405,18 @@ static void step_recv_first(struct stream_ctx *sctx, bool success)
 
   gnmi_log(GNMI_LOG_DEBUG, "Subscribe: mode=%d n_subs=%zu", sctx->mode, req->subscribe->n_subscription);
 
-  /* Build initial data + sync for all modes */
-  if (build_subscribe_data(sctx, req->subscribe) < 0) {
+  /* Build initial data + sync for all modes.
+   * When updates_only is set (ONCE/STREAM), skip the initial data
+   * snapshot and send only the sync_response (gNMI 0.7.0 s3.5.1.5). */
+  if (req->subscribe->updates_only) {
+    Gnmi__SubscribeResponse sync = GNMI__SUBSCRIBE_RESPONSE__INIT;
+    sync.response_case = GNMI__SUBSCRIBE_RESPONSE__RESPONSE_SYNC_RESPONSE;
+    sync.sync_response = 1;
+    if (send_queue_push(sctx, gnmi_pack((ProtobufCMessage *)&sync)) < 0) {
+      stream_close(sctx, GRPC_STATUS_INTERNAL, "Failed to queue sync_response");
+      return;
+    }
+  } else if (build_subscribe_data(sctx, req->subscribe) < 0) {
     stream_close(sctx, GRPC_STATUS_INTERNAL, "Failed to build subscription data");
     return;
   }

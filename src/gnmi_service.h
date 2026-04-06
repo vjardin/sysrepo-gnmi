@@ -49,5 +49,9 @@ int gnmi_service_init(gnmi_server_t *srv);
  * Caller must sr_session_stop() the session. */
 int gnmi_session_start(gnmi_server_t *srv, sr_datastore_t ds, sr_session_ctx_t **sess);
 
+/* Start a sysrepo session with NACM user set, from a connection.
+ * For use in RPC handlers that receive sr_conn_ctx_t (not gnmi_server_t). */
+int gnmi_nacm_session_start(sr_conn_ctx_t *conn, sr_datastore_t ds, sr_session_ctx_t **sess);
+
 /* Drain: re-arm request_registered_call for a given method index */
 void gnmi_service_rearm(gnmi_server_t *srv, int method_idx);
