@@ -190,6 +190,10 @@ int monitoring_init(gnmi_server_t *srv, sr_conn_ctx_t *conn, const char *yang_di
     gnmi_log(GNMI_LOG_WARNING, "monitoring: kill-session RPC subscribe failed: %s",
              sr_strerror(rc));
 
+  /* Note: get-schema RPC is handled directly in rpc.c (short-circuit)
+   * because sysrepo's in-process RPC callback output doesn't propagate
+   * through sr_rpc_send_tree. No subscription needed here. */
+
   gnmi_log(GNMI_LOG_INFO, "Monitoring: operational state provider registered");
   return 0;
 }

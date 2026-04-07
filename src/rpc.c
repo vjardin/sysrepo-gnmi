@@ -18,12 +18,122 @@
 #define RPC_DEFAULT_TIMEOUT_MS  2000   /* 2s default RPC timeout */
 #define RPC_MAX_TIMEOUT_MS     10000   /* 10s maximum RPC timeout */
 
+#include <errno.h>
+
 #include <sysrepo.h>
 #include <libyang/libyang.h>
 #include <libyang/in.h>
 #include <cjson/cJSON.h>
 
 #include "gnmi.pb-c.h"
+
+/* get-schema: read YANG source from sysrepo repository */
+
+static grpc_status_code
+handle_get_schema(sr_conn_ctx_t *sr_conn, const Gnmi__RpcRequest *req,
+    grpc_byte_buffer **response_bb, char **status_msg)
+{
+  /* Parse input JSON: {"identifier": "...", "version": "..."} */
+  char *json_in = strndup((const char *)req->val->json_ietf_val.data,
+                          req->val->json_ietf_val.len);
+  cJSON *obj = cJSON_Parse(json_in);
+  free(json_in);
+  if (!obj) {
+    *status_msg = strdup("Invalid JSON input");
+    return GRPC_STATUS_INVALID_ARGUMENT;
+  }
+
+  const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(obj, "identifier"));
+  const char *version = cJSON_GetStringValue(cJSON_GetObjectItem(obj, "version"));
+  if (!name || !name[0]) {
+    cJSON_Delete(obj);
+    *status_msg = strdup("Missing 'identifier' in get-schema input");
+    return GRPC_STATUS_INVALID_ARGUMENT;
+  }
+
+  /* Look up the module to get its revision */
+  sr_session_ctx_t *sess = NULL;
+  int rc = sr_session_start(sr_conn, SR_DS_RUNNING, &sess);
+  if (rc != SR_ERR_OK) {
+    cJSON_Delete(obj);
+    *status_msg = strdup("Failed to start session");
+    return GRPC_STATUS_INTERNAL;
+  }
+
+  const struct ly_ctx *ctx = sr_session_acquire_context(sess);
+  const struct lys_module *mod;
+  if (version && version[0])
+    mod = ly_ctx_get_module(ctx, name, version);
+  else
+    mod = ly_ctx_get_module_implemented(ctx, name);
+
+  if (!mod) {
+    sr_session_release_context(sess);
+    sr_session_stop(sess);
+    cJSON_Delete(obj);
+    if (asprintf(status_msg, "Module '%s' not found", name) < 0)
+      *status_msg = strdup("Module not found");
+    return GRPC_STATUS_NOT_FOUND;
+  }
+
+  /* Build file path: <repo>/yang/<name>@<rev>.yang */
+  char yang_path[512];
+  if (mod->revision)
+    snprintf(yang_path, sizeof(yang_path), "%s/yang/%s@%s.yang",
+             sr_get_repo_path(), name, mod->revision);
+  else
+    snprintf(yang_path, sizeof(yang_path), "%s/yang/%s.yang",
+             sr_get_repo_path(), name);
+
+  sr_session_release_context(sess);
+  sr_session_stop(sess);
+  cJSON_Delete(obj);
+
+  /* Read the YANG file */
+  FILE *f = fopen(yang_path, "r");
+  if (!f) {
+    if (asprintf(status_msg, "Cannot read schema file: %s", strerror(errno)) < 0)
+      *status_msg = strdup("Cannot read schema file");
+    return GRPC_STATUS_NOT_FOUND;
+  }
+
+  fseek(f, 0, SEEK_END);
+  long fsize = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  char *schema = malloc(fsize + 1);
+  if (!schema) {
+    fclose(f);
+    *status_msg = strdup("Out of memory");
+    return GRPC_STATUS_RESOURCE_EXHAUSTED;
+  }
+  size_t nread = fread(schema, 1, fsize, f);
+  schema[nread] = '\0';
+  fclose(f);
+
+  /* Build JSON response: {"sysrepo-gnmi-monitoring:schema": "..."} */
+  cJSON *out_obj = cJSON_CreateObject();
+  cJSON_AddStringToObject(out_obj, "sysrepo-gnmi-monitoring:schema", schema);
+  char *out_json = cJSON_PrintUnformatted(out_obj);
+  cJSON_Delete(out_obj);
+  free(schema);
+
+  Gnmi__RpcResponse resp = GNMI__RPC_RESPONSE__INIT;
+  resp.timestamp = get_time_nanosec();
+  resp.val = calloc(1, sizeof(*resp.val));
+  gnmi__typed_value__init(resp.val);
+  resp.val->value_case = GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL;
+  resp.val->json_ietf_val.data = (uint8_t *)out_json;
+  resp.val->json_ietf_val.len = strlen(out_json);
+
+  *response_bb = gnmi_pack((ProtobufCMessage *)&resp);
+
+  gnmi_log(GNMI_LOG_DEBUG, "get-schema: returned '%s' (%zu bytes)", name, nread);
+
+  cJSON_free(out_json);
+  free(resp.val);
+  return GRPC_STATUS_OK;
+}
 
 grpc_status_code handle_rpc(sr_conn_ctx_t *sr_conn,
           struct gnmi_session *session,
@@ -50,6 +160,18 @@ grpc_status_code handle_rpc(sr_conn_ctx_t *sr_conn,
   xpath = gnmi_to_xpath(req->path, status_msg);
   if (!xpath) {
     ret = GRPC_STATUS_INVALID_ARGUMENT;
+    goto cleanup;
+  }
+
+  /* Short-circuit: handle get-schema directly (sysrepo RPC callback
+   * output doesn't propagate through sr_rpc_send_tree in-process) */
+  if (strcmp(xpath, "/sysrepo-gnmi-monitoring:get-schema") == 0) {
+    if (req->val && req->val->value_case == GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL) {
+      ret = handle_get_schema(sr_conn, req, response_bb, status_msg);
+    } else {
+      *status_msg = strdup("get-schema requires JSON_IETF input");
+      ret = GRPC_STATUS_INVALID_ARGUMENT;
+    }
     goto cleanup;
   }
 

@@ -11,9 +11,9 @@ module sysrepo-gnmi-monitoring {
     "Operational state for the sysrepo-gnmi server.
      Exposes active sessions, subscribe streams, and RPC counters.";
 
-  revision 2026-04-08 {
+  revision 2026-04-09 {
     description
-      "Add kill-session RPC and killed-by-session-id to gnmi-session-end.";
+      "Add get-schema RPC for YANG module download (RFC 6022 equivalent).";
   }
 
   container server-state {
@@ -154,6 +154,34 @@ module sysrepo-gnmi-monitoring {
         type string;
         description
           "Human-readable result message.";
+      }
+    }
+  }
+
+  rpc get-schema {
+    description
+      "Retrieve the YANG source of an installed module by name and
+       optional revision. Equivalent to RFC 6022 get-schema for
+       gNMI clients that lack out-of-band schema access.";
+    input {
+      leaf identifier {
+        type string;
+        mandatory true;
+        description
+          "YANG module name (e.g. 'ietf-interfaces').";
+      }
+      leaf version {
+        type string;
+        description
+          "Module revision date (e.g. '2018-02-20').
+           If omitted, the latest implemented revision is returned.";
+      }
+    }
+    output {
+      leaf schema {
+        type string;
+        description
+          "YANG module source text.";
       }
     }
   }

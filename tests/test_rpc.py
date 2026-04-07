@@ -103,3 +103,66 @@ def test_rpc_timeout(gnmi_stub):
         gnmi_stub.Rpc(req, timeout=10)  # gRPC timeout longer than SR timeout
     assert exc_info.value.code() == grpc.StatusCode.ABORTED
     assert "timed out" in exc_info.value.details().lower()
+
+
+def test_get_schema_known_module(gnmi_stub):
+    """get-schema: fetch a known YANG module by name.
+
+    Retrieves the gnmi-server-test module and verifies it contains
+    expected YANG keywords.
+    """
+    req = gnmi_pb2.RpcRequest()
+    req.path.CopyFrom(
+        xpath_to_path("/sysrepo-gnmi-monitoring:get-schema")
+    )
+    req.val.json_ietf_val = json.dumps(
+        {"identifier": "gnmi-server-test"}
+    ).encode()
+    req.encoding = gnmi_pb2.JSON_IETF
+
+    resp = gnmi_stub.Rpc(req, timeout=5)
+    assert resp.timestamp > 0
+    # The response contains JSON-wrapped YANG source; parse to extract
+    raw = resp.val.json_ietf_val.decode() if resp.val.json_ietf_val else ""
+    # Response is JSON: {"sysrepo-gnmi-monitoring:schema": "module ..."}
+    parsed = json.loads(raw) if raw else {}
+    schema = parsed.get("sysrepo-gnmi-monitoring:schema",
+                        parsed.get("schema", ""))
+    assert "module" in schema, "Expected YANG 'module' keyword in schema"
+    assert "gnmi-server-test" in schema, "Expected module name in schema"
+
+
+def test_get_schema_monitoring_module(gnmi_stub):
+    """get-schema: fetch the monitoring module itself."""
+    req = gnmi_pb2.RpcRequest()
+    req.path.CopyFrom(
+        xpath_to_path("/sysrepo-gnmi-monitoring:get-schema")
+    )
+    req.val.json_ietf_val = json.dumps(
+        {"identifier": "sysrepo-gnmi-monitoring"}
+    ).encode()
+    req.encoding = gnmi_pb2.JSON_IETF
+
+    resp = gnmi_stub.Rpc(req, timeout=5)
+    raw = resp.val.json_ietf_val.decode() if resp.val.json_ietf_val else ""
+    parsed = json.loads(raw) if raw else {}
+    schema = parsed.get("sysrepo-gnmi-monitoring:schema",
+                        parsed.get("schema", ""))
+    assert "kill-session" in schema, "Expected kill-session RPC in monitoring schema"
+    assert "get-schema" in schema, "Expected get-schema RPC in monitoring schema"
+
+
+def test_get_schema_not_found(gnmi_stub):
+    """get-schema: request a non-existent module returns error."""
+    req = gnmi_pb2.RpcRequest()
+    req.path.CopyFrom(
+        xpath_to_path("/sysrepo-gnmi-monitoring:get-schema")
+    )
+    req.val.json_ietf_val = json.dumps(
+        {"identifier": "nonexistent-module-xyz"}
+    ).encode()
+    req.encoding = gnmi_pb2.JSON_IETF
+
+    with pytest.raises(grpc.RpcError) as exc_info:
+        gnmi_stub.Rpc(req, timeout=5)
+    assert exc_info.value.code() != grpc.StatusCode.OK

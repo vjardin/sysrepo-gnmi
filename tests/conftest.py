@@ -153,6 +153,7 @@ _COMPLIANCE_MAP = [
     ("test_nacm_capabilities", "RFC 8341 §3.7 NACM defaults"),
 
     # --- gNMI RPC/Action invocation
+    ("test_get_schema", "RFC 6022 get-schema"),
     ("test_rpc", "gNMI RPC/Action"),
 
     # --- Stress / performance
