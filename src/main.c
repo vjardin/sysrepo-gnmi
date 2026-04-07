@@ -108,6 +108,10 @@ int main(int argc, char **argv)
 
   gnmi_log(GNMI_LOG_INFO, "sysrepo-gnmi %s starting on %s", GNMI_SERVER_VERSION, cfg.bind_addr);
 
+  if (cfg.insecure && !cfg.username)
+    gnmi_log(GNMI_LOG_WARNING,
+      "WARNING: running insecure without NACM user (-u) -- all access unrestricted");
+
   /* Connect to sysrepo with retry */
   sr_conn_ctx_t *sr_conn = NULL;
   int rc;
