@@ -2,8 +2,16 @@ builddir/
 .venv/
 subprojects/libyang/
 subprojects/libyang-v3/
+subprojects/libyang-v2/
+subprojects/libyang-v5/
 subprojects/sysrepo/
 subprojects/sysrepo-v3/
+subprojects/sysrepo-v2/
+subprojects/sysrepo-v5/
 proto/generated/
+tests/proto/gnmi_pb2.py
+tests/proto/gnmi_pb2_grpc.py
+tests/proto/gnmi_ext_pb2.py
+tests/proto/gnmi_ext_pb2_grpc.py
 __pycache__/
 *.pyc
