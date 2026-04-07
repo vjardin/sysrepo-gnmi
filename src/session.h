@@ -8,6 +8,13 @@
 #include <stdint.h>
 #include <time.h>
 
+#include <sysrepo.h>
+
+struct event;  /* forward */
+
+/* Session registry (owned by gnmi_server) */
+typedef struct gnmi_session_registry gnmi_session_registry_t;
+
 /*
  * gNMI session tracking.
  *
@@ -16,7 +23,8 @@
  * idle timeout fires or the server shuts down.
  *
  * Tracked state: session ID, peer address, username, timestamps,
- * active subscribe stream count, and RPC counters.
+ * active subscribe stream count, RPC counters, and per-session
+ * candidate datastore.
  */
 
 struct gnmi_session {
@@ -28,14 +36,22 @@ struct gnmi_session {
   int                   active_streams;
   uint64_t              rpc_count;
   uint64_t              rpc_errors;
+
+  /* Per-session candidate datastore (locked persistent sysrepo session).
+   * Only one session can hold the candidate lock at a time.
+   * NULL when no candidate edits are pending. */
+  sr_session_ctx_t     *candidate_sess;
+  struct event         *candidate_idle_timer;
+  struct event_base    *evbase;  /* back-reference for timers */
+  gnmi_session_registry_t *registry; /* back-reference for lookups */
+
   struct gnmi_session  *next;
 };
 
-/* Session registry (owned by gnmi_server) */
-typedef struct gnmi_session_registry gnmi_session_registry_t;
+struct event_base;
 
 /* Create / destroy the registry */
-gnmi_session_registry_t *gnmi_session_registry_create(void);
+gnmi_session_registry_t *gnmi_session_registry_create(struct event_base *evbase);
 void gnmi_session_registry_destroy(gnmi_session_registry_t *reg);
 
 /* Look up or create a session for the given peer address.
@@ -65,3 +81,18 @@ const struct gnmi_session *gnmi_session_first(const gnmi_session_registry_t *reg
 /* Remove sessions idle for more than idle_secs.
  * Returns number of sessions removed. */
 int gnmi_session_reap_idle(gnmi_session_registry_t *reg, unsigned int idle_secs);
+
+/* Get the event_base associated with the registry (for timers). */
+struct event_base *gnmi_session_registry_evbase(gnmi_session_registry_t *reg);
+
+/* Find the session that currently holds the candidate lock (if any).
+ * Returns NULL if no session holds it. */
+const struct gnmi_session *gnmi_session_candidate_holder(
+    const gnmi_session_registry_t *reg);
+
+/* Release candidate datastore for a session (discard + unlock + stop).
+ * Safe to call if no candidate is held. */
+void gnmi_session_candidate_release(struct gnmi_session *s);
+
+/* Release candidate datastores on all sessions (called on shutdown). */
+void gnmi_session_candidate_cleanup_all(gnmi_session_registry_t *reg);

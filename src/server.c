@@ -6,7 +6,6 @@
 #include "server.h"
 #include "gnmi_service.h"
 #include "confirm.h"
-#include "set.h"
 #include "session.h"
 #include "log.h"
 
@@ -227,16 +226,13 @@ gnmi_server_t *gnmi_server_create(const struct gnmi_config *cfg, sr_conn_ctx_t *
   if (cs)
     confirm_state_set_global(cs);
 
-  /* Candidate datastore idle timeout support */
-  candidate_init(srv->evbase);
-
   /* CQ poll timer (one-shot, re-armed adaptively in callback) */
   struct timeval tv = { .tv_sec = 0, .tv_usec = CQ_POLL_FAST_US };
   srv->ev_cq_poll = evtimer_new(srv->evbase, on_cq_poll_cb, srv);
   evtimer_add(srv->ev_cq_poll, &tv);
 
   /* Session registry + idle reaper */
-  srv->sessions = gnmi_session_registry_create();
+  srv->sessions = gnmi_session_registry_create(srv->evbase);
   srv->ev_session_reap = evtimer_new(srv->evbase, on_session_reap_cb, srv);
   struct timeval reap_tv = { .tv_sec = SESSION_REAP_INTERVAL_SEC };
   evtimer_add(srv->ev_session_reap, &reap_tv);
@@ -299,8 +295,8 @@ void gnmi_server_destroy(gnmi_server_t *srv)
     gnmi_session_registry_destroy(srv->sessions);
   }
 
-  /* Release candidate session if held */
-  candidate_cleanup();
+  /* Release candidate sessions on all sessions */
+  gnmi_session_candidate_cleanup_all(srv->sessions);
 
   /* Destroy confirmed-commit state */
   confirm_state_t *cs = confirm_state_get_global();

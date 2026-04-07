@@ -53,7 +53,7 @@ ProtobufCMessage *gnmi_unpack(const ProtobufCMessageDescriptor *desc, grpc_byte_
 /* - RPC method table ---------------------------------------------- */
 
 typedef grpc_status_code (*unary_handler_fn)(sr_conn_ctx_t *sr_conn,
-               const struct gnmi_session *session,
+               struct gnmi_session *session,
                grpc_byte_buffer *req, grpc_byte_buffer **resp, char **status_msg);
 
 struct rpc_method {

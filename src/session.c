@@ -11,19 +11,27 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdatomic.h>
+#include <event2/event.h>
 
 struct gnmi_session_registry {
   struct gnmi_session *head;
   uint32_t             count;
-  uint32_t             total_streams;
+  struct event_base   *evbase;
 };
 
 static atomic_uint_least64_t next_id = 1;
 
-gnmi_session_registry_t *gnmi_session_registry_create(void)
+gnmi_session_registry_t *gnmi_session_registry_create(struct event_base *evbase)
 {
   gnmi_session_registry_t *reg = calloc(1, sizeof(*reg));
+  if (reg)
+    reg->evbase = evbase;
   return reg;
+}
+
+struct event_base *gnmi_session_registry_evbase(gnmi_session_registry_t *reg)
+{
+  return reg ? reg->evbase : NULL;
 }
 
 void gnmi_session_registry_destroy(gnmi_session_registry_t *reg)
@@ -33,6 +41,7 @@ void gnmi_session_registry_destroy(gnmi_session_registry_t *reg)
   struct gnmi_session *s = reg->head;
   while (s) {
     struct gnmi_session *next = s->next;
+    gnmi_session_candidate_release(s);
     free(s->peer_addr);
     free(s->username);
     free(s);
@@ -69,6 +78,8 @@ struct gnmi_session *gnmi_session_get(gnmi_session_registry_t *reg,
   s->peer_addr = strdup(peer_addr);
   if (username && username[0])
     s->username = strdup(username);
+  s->evbase = reg->evbase;
+  s->registry = reg;
   clock_gettime(CLOCK_MONOTONIC, &s->connected_at);
   s->last_rpc = s->connected_at;
 
@@ -161,6 +172,7 @@ int gnmi_session_reap_idle(gnmi_session_registry_t *reg, unsigned int idle_secs)
                (unsigned long)s->rpc_count, (unsigned long)s->rpc_errors);
       *pp = s->next;
       reg->count--;
+      gnmi_session_candidate_release(s);
       free(s->peer_addr);
       free(s->username);
       free(s);
@@ -170,4 +182,48 @@ int gnmi_session_reap_idle(gnmi_session_registry_t *reg, unsigned int idle_secs)
     }
   }
   return reaped;
+}
+
+/* - Per-session candidate datastore ------------------------------- */
+
+const struct gnmi_session *gnmi_session_candidate_holder(
+    const gnmi_session_registry_t *reg)
+{
+  if (!reg)
+    return NULL;
+  for (const struct gnmi_session *s = reg->head; s; s = s->next) {
+    if (s->candidate_sess)
+      return s;
+  }
+  return NULL;
+}
+
+void gnmi_session_candidate_release(struct gnmi_session *s)
+{
+  if (!s || !s->candidate_sess)
+    return;
+  if (s->candidate_idle_timer) {
+    evtimer_del(s->candidate_idle_timer);
+    event_free(s->candidate_idle_timer);
+    s->candidate_idle_timer = NULL;
+  }
+  sr_unlock(s->candidate_sess, NULL);
+  sr_session_stop(s->candidate_sess);
+  s->candidate_sess = NULL;
+  gnmi_log(GNMI_LOG_DEBUG, "Session %lu: candidate unlocked and released",
+           (unsigned long)s->id);
+}
+
+void gnmi_session_candidate_cleanup_all(gnmi_session_registry_t *reg)
+{
+  if (!reg)
+    return;
+  for (struct gnmi_session *s = reg->head; s; s = s->next) {
+    if (s->candidate_sess) {
+      gnmi_log(GNMI_LOG_INFO, "Session %lu: discarding candidate on shutdown",
+               (unsigned long)s->id);
+      sr_discard_changes(s->candidate_sess);
+      gnmi_session_candidate_release(s);
+    }
+  }
 }

@@ -23,98 +23,67 @@
 #include "gnmi_ext.pb-c.h"
 #include "google/protobuf/duration.pb-c.h"
 
-/* - Candidate datastore session (persistent, locked) -------------- */
+/* - Per-session candidate datastore -------------------------------- */
 /*
- * Mirrors how netopeer2 handles candidate: a persistent sysrepo session
- * is created and locked on first Set(target=candidate).  The lock keeps
- * candidate independent from running.  Edits accumulate in candidate
- * across multiple Set RPCs.  commit-candidate copies to running and
- * releases the session.  discard-candidate discards and releases.
- * sr_unlock() resets candidate to mirror running automatically.
+ * Each gNMI session gets its own candidate datastore (locked sysrepo
+ * session).  Only one session can hold the candidate lock at a time;
+ * others get FAILED_PRECONDITION.  This mirrors netopeer2's per-NETCONF-
+ * session candidate.
  */
 
 /* Auto-discard candidate after 5 minutes of inactivity */
 #define CANDIDATE_IDLE_TIMEOUT_SEC  300
 
-static sr_session_ctx_t *candidate_sess;
-static struct event *candidate_idle_timer;
-static struct event_base *candidate_evbase;
-static void candidate_release(void);
-
 static void candidate_idle_cb(evutil_socket_t fd, short what, void *arg)
 {
-  (void)fd; (void)what; (void)arg;
-  if (!candidate_sess)
+  (void)fd; (void)what;
+  struct gnmi_session *s = arg;
+  if (!s->candidate_sess)
     return;
-  gnmi_log(GNMI_LOG_WARNING, "Candidate: idle timeout, discarding uncommitted changes");
-  sr_discard_changes(candidate_sess);
-  candidate_release();
+  gnmi_log(GNMI_LOG_WARNING, "Session %lu: candidate idle timeout, discarding",
+           (unsigned long)s->id);
+  sr_discard_changes(s->candidate_sess);
+  gnmi_session_candidate_release(s);
 }
 
-static sr_session_ctx_t *candidate_acquire(sr_conn_ctx_t *conn,
-    struct event_base *evbase)
+static sr_session_ctx_t *candidate_acquire(struct gnmi_session *s,
+    sr_conn_ctx_t *conn)
 {
-  if (candidate_sess) {
+  if (!s)
+    return NULL;
+
+  if (s->candidate_sess) {
     /* Reset idle timer on each access */
-    if (candidate_idle_timer) {
+    if (s->candidate_idle_timer) {
       struct timeval tv = { .tv_sec = CANDIDATE_IDLE_TIMEOUT_SEC };
-      evtimer_add(candidate_idle_timer, &tv);
+      evtimer_add(s->candidate_idle_timer, &tv);
     }
-    return candidate_sess;
+    return s->candidate_sess;
   }
 
-  int rc = sr_session_start(conn, SR_DS_CANDIDATE, &candidate_sess);
+  int rc = sr_session_start(conn, SR_DS_CANDIDATE, &s->candidate_sess);
   if (rc != SR_ERR_OK)
     return NULL;
 
-  rc = sr_lock(candidate_sess, NULL, 0);
+  rc = sr_lock(s->candidate_sess, NULL, 0);
   if (rc != SR_ERR_OK) {
-    gnmi_log(GNMI_LOG_ERROR, "Candidate: sr_lock failed: %s", sr_strerror(rc));
-    sr_session_stop(candidate_sess);
-    candidate_sess = NULL;
+    gnmi_log(GNMI_LOG_ERROR, "Session %lu: candidate sr_lock failed: %s",
+             (unsigned long)s->id, sr_strerror(rc));
+    sr_session_stop(s->candidate_sess);
+    s->candidate_sess = NULL;
     return NULL;
   }
 
   /* Start idle timeout */
-  if (evbase) {
-    candidate_idle_timer = evtimer_new(evbase, candidate_idle_cb, NULL);
+  if (s->evbase) {
+    s->candidate_idle_timer = evtimer_new(s->evbase, candidate_idle_cb, s);
     struct timeval tv = { .tv_sec = CANDIDATE_IDLE_TIMEOUT_SEC };
-    evtimer_add(candidate_idle_timer, &tv);
+    evtimer_add(s->candidate_idle_timer, &tv);
   }
 
-  gnmi_log(GNMI_LOG_DEBUG, "Candidate: session created and locked");
-  return candidate_sess;
-}
-
-static void candidate_release(void)
-{
-  if (!candidate_sess)
-    return;
-  /* Cancel idle timer */
-  if (candidate_idle_timer) {
-    evtimer_del(candidate_idle_timer);
-    event_free(candidate_idle_timer);
-    candidate_idle_timer = NULL;
-  }
-  /* sr_unlock resets candidate to mirror running */
-  sr_unlock(candidate_sess, NULL);
-  sr_session_stop(candidate_sess);
-  candidate_sess = NULL;
-  gnmi_log(GNMI_LOG_DEBUG, "Candidate: session unlocked and released");
-}
-
-void candidate_cleanup(void)
-{
-  if (candidate_sess) {
-    gnmi_log(GNMI_LOG_INFO, "Candidate: releasing on shutdown");
-    sr_discard_changes(candidate_sess);
-  }
-  candidate_release();
-}
-
-void candidate_init(struct event_base *evbase)
-{
-  candidate_evbase = evbase;
+  gnmi_log(GNMI_LOG_DEBUG, "Session %lu: candidate created and locked",
+           (unsigned long)s->id);
+  return s->candidate_sess;
 }
 
 /* - Result tracking ----------------------------------------------- */
@@ -344,7 +313,7 @@ process_updates(sr_session_ctx_t *sess, size_t n_updates, Gnmi__Update **updates
 /* - Set RPC handler ----------------------------------------------- */
 
 grpc_status_code handle_set(sr_conn_ctx_t *sr_conn,
-          const struct gnmi_session *session,
+          struct gnmi_session *session,
           grpc_byte_buffer *request_bb, grpc_byte_buffer **response_bb,
           char **status_msg)
 {
@@ -386,17 +355,17 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn,
    * INTO the session's current DS.  So we need a running session
    * and copy FROM candidate. */
   if (strcmp(target, "commit-candidate") == 0) {
-    if (!candidate_sess) {
+    if (!session || !session->candidate_sess) {
       *status_msg = strdup("No candidate session to commit");
       ret = GRPC_STATUS_FAILED_PRECONDITION;
       goto cleanup;
     }
     /* Switch the locked candidate session to running DS, then copy
      * FROM candidate.  The lock holder can read candidate. */
-    sr_session_switch_ds(candidate_sess, SR_DS_RUNNING);
-    int crc = sr_copy_config(candidate_sess, NULL, SR_DS_CANDIDATE, 0);
-    sr_session_switch_ds(candidate_sess, SR_DS_CANDIDATE);
-    candidate_release();
+    sr_session_switch_ds(session->candidate_sess, SR_DS_RUNNING);
+    int crc = sr_copy_config(session->candidate_sess, NULL, SR_DS_CANDIDATE, 0);
+    sr_session_switch_ds(session->candidate_sess, SR_DS_CANDIDATE);
+    gnmi_session_candidate_release(session);
     if (crc != SR_ERR_OK) {
       *status_msg = strdup(sr_strerror(crc));
       ret = GRPC_STATUS_ABORTED;
@@ -408,7 +377,8 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn,
       sr_copy_config(su, NULL, SR_DS_RUNNING, 0);
       sr_session_stop(su);
     }
-    gnmi_log(GNMI_LOG_INFO, "Candidate: committed to running");
+    gnmi_log(GNMI_LOG_INFO, "Session %lu: candidate committed to running",
+             session ? (unsigned long)session->id : 0);
     resp.timestamp = get_time_nanosec();
     *response_bb = gnmi_pack((ProtobufCMessage *)&resp);
     ret = GRPC_STATUS_OK;
@@ -417,22 +387,37 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn,
 
   /* discard-candidate: discard changes and release */
   if (strcmp(target, "discard-candidate") == 0) {
-    if (candidate_sess)
-      sr_discard_changes(candidate_sess);
-    candidate_release();
-    gnmi_log(GNMI_LOG_INFO, "Candidate: discarded");
+    if (session && session->candidate_sess)
+      sr_discard_changes(session->candidate_sess);
+    if (session)
+      gnmi_session_candidate_release(session);
+    gnmi_log(GNMI_LOG_INFO, "Session %lu: candidate discarded",
+             session ? (unsigned long)session->id : 0);
     resp.timestamp = get_time_nanosec();
     *response_bb = gnmi_pack((ProtobufCMessage *)&resp);
     ret = GRPC_STATUS_OK;
     goto cleanup;
   }
 
-  /* For candidate edits, use the persistent locked session */
+  /* For candidate edits, use the per-session locked candidate */
   int rc;
   if (use_candidate) {
-    sess = candidate_acquire(sr_conn, candidate_evbase);
+    sess = candidate_acquire(session, sr_conn);
     if (!sess) {
-      *status_msg = strdup("Failed to acquire candidate session");
+      /* Find who holds the lock for a helpful error message */
+      const struct gnmi_session *holder = session ?
+          gnmi_session_candidate_holder(session->registry) : NULL;
+      if (holder && holder != session) {
+        char buf[256];
+        snprintf(buf, sizeof(buf),
+                 "Candidate lock held by session %lu (%s%s%s)",
+                 (unsigned long)holder->id, holder->peer_addr,
+                 holder->username ? " user=" : "",
+                 holder->username ? holder->username : "");
+        *status_msg = strdup(buf);
+      } else {
+        *status_msg = strdup("Failed to acquire candidate session");
+      }
       ret = GRPC_STATUS_ABORTED;
       goto cleanup;
     }
