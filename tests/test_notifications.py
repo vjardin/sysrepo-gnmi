@@ -266,3 +266,50 @@ def test_confirmed_commit_cancel_notification(notif_server):
         "Expected commit-id in cancel log")
 
     channel.close()
+
+
+def test_kill_session(notif_server):
+    """Invoke kill-session RPC, verify the target session is removed
+    and a session-end notification with reason 'killed' is logged."""
+    import re
+    proc, log_path = notif_server
+
+    # Create a session by doing a Capabilities call with a known username
+    channel = grpc.insecure_channel(NOTIF_BIND)
+    stub = gnmi_pb2_grpc.gNMIStub(channel)
+    resp = stub.Capabilities(
+        gnmi_pb2.CapabilityRequest(),
+        metadata=[("username", "victim")],
+    )
+    assert resp.gNMI_version
+
+    # Read log to find the session ID assigned to "victim"
+    time.sleep(0.3)
+    log = _read_log(log_path)
+    # Log line looks like: "Session 1: new from ... user=victim"
+    match = re.search(r"Session (\d+): new from .* user=victim", log)
+    assert match, f"Could not find victim session in log:\n{log}"
+    victim_id = int(match.group(1))
+
+    # Invoke the kill-session RPC via gNMI Rpc
+    rpc_req = gnmi_pb2.RpcRequest()
+    rpc_req.path.CopyFrom(
+        xpath_to_path("/sysrepo-gnmi-monitoring:kill-session")
+    )
+    rpc_req.val.json_ietf_val = json.dumps(
+        {"session-id": str(victim_id)}
+    ).encode()
+    rpc_req.encoding = gnmi_pb2.JSON_IETF
+
+    rpc_resp = stub.Rpc(rpc_req, timeout=5)
+    assert rpc_resp.timestamp > 0
+
+    # Verify session-end with reason "killed" in the log
+    time.sleep(0.3)
+    log = _read_log(log_path)
+    assert f"Session {victim_id}: killed by session" in log, (
+        f"Expected kill log for session {victim_id}")
+    assert f"kill-session: session {victim_id} terminated" in log, (
+        "Expected kill-session result in log")
+
+    channel.close()

@@ -11,9 +11,9 @@ module sysrepo-gnmi-monitoring {
     "Operational state for the sysrepo-gnmi server.
      Exposes active sessions, subscribe streams, and RPC counters.";
 
-  revision 2026-04-07 {
+  revision 2026-04-08 {
     description
-      "Initial revision.";
+      "Add kill-session RPC and killed-by-session-id to gnmi-session-end.";
   }
 
   container server-state {
@@ -121,11 +121,39 @@ module sysrepo-gnmi-monitoring {
           description "Session reaped after idle timeout.";
         }
         enum killed {
-          description "Session terminated by the server.";
+          description "Session terminated by operator via kill-session.";
         }
         enum resource-exhausted {
           description "Session rejected due to resource limits.";
         }
+      }
+    }
+    leaf killed-by-session-id {
+      type uint64;
+      description
+        "Session ID of the operator that issued kill-session.
+         Only present when reason is 'killed'.";
+    }
+  }
+
+  rpc kill-session {
+    description
+      "Terminate a gNMI client session by ID. The server releases
+       any candidate lock held by the target session and emits a
+       gnmi-session-end notification with reason 'killed'.";
+    input {
+      leaf session-id {
+        type uint64;
+        mandatory true;
+        description
+          "ID of the session to terminate.";
+      }
+    }
+    output {
+      leaf result {
+        type string;
+        description
+          "Human-readable result message.";
       }
     }
   }

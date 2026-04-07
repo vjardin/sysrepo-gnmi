@@ -100,6 +100,48 @@ oper_get_cb(sr_session_ctx_t *session, uint32_t sub_id,
   return SR_ERR_OK;
 }
 
+static int
+kill_session_cb(sr_session_ctx_t *session, uint32_t sub_id,
+    const char *op_path, const struct lyd_node *input,
+    sr_event_t event, uint32_t request_id,
+    struct lyd_node *output, void *private_data)
+{
+  (void)session; (void)sub_id; (void)op_path;
+  (void)event; (void)request_id; (void)private_data;
+
+  struct lyd_node *id_node = NULL;
+  lyd_find_path(input, "session-id", 0, &id_node);
+  if (!id_node || !lyd_get_value(id_node)) {
+    gnmi_log(GNMI_LOG_ERROR, "kill-session: missing session-id");
+    return SR_ERR_INVAL_ARG;
+  }
+
+  uint64_t target_id = strtoull(lyd_get_value(id_node), NULL, 10);
+
+  /* Determine killer's session ID from the sysrepo originator name.
+   * We don't have direct access to the gNMI session in this callback,
+   * so pass 0 (unknown) as the killer. The caller session can be
+   * identified from the notification context. */
+  gnmi_session_registry_t *reg = gnmi_server_get_sessions(mon_srv);
+  int rc = gnmi_session_kill(reg, target_id, 0);
+
+  const struct ly_ctx *ctx = sr_session_acquire_context(session);
+  if (rc == 0) {
+    lyd_new_path(output, ctx, "result", "Session killed", 0, NULL);
+    gnmi_log(GNMI_LOG_INFO, "kill-session: session %lu terminated",
+             (unsigned long)target_id);
+  } else {
+    char buf[128];
+    snprintf(buf, sizeof(buf), "Session %lu not found", (unsigned long)target_id);
+    lyd_new_path(output, ctx, "result", buf, 0, NULL);
+    gnmi_log(GNMI_LOG_WARNING, "kill-session: session %lu not found",
+             (unsigned long)target_id);
+  }
+  sr_session_release_context(session);
+
+  return SR_ERR_OK;
+}
+
 int monitoring_init(gnmi_server_t *srv, sr_conn_ctx_t *conn, const char *yang_dir)
 {
   mon_srv = srv;
@@ -110,7 +152,13 @@ int monitoring_init(gnmi_server_t *srv, sr_conn_ctx_t *conn, const char *yang_di
            yang_dir ? yang_dir : ".");
 
   int rc = sr_install_module(conn, yang_path, yang_dir, NULL);
-  if (rc != SR_ERR_OK && rc != SR_ERR_EXISTS) {
+  if (rc == SR_ERR_EXISTS) {
+    /* Module exists but may be outdated — update it */
+    rc = sr_update_module(conn, yang_path, yang_dir);
+    if (rc != SR_ERR_OK && rc != SR_ERR_EXISTS)
+      gnmi_log(GNMI_LOG_DEBUG, "monitoring: sr_update_module: %s (non-fatal)",
+               sr_strerror(rc));
+  } else if (rc != SR_ERR_OK) {
     gnmi_log(GNMI_LOG_WARNING, "monitoring: sr_install_module failed: %s",
              sr_strerror(rc));
     return -1;
@@ -133,6 +181,14 @@ int monitoring_init(gnmi_server_t *srv, sr_conn_ctx_t *conn, const char *yang_di
     mon_sess = NULL;
     return -1;
   }
+
+  /* Subscribe to kill-session RPC */
+  rc = sr_rpc_subscribe_tree(mon_sess,
+      "/" MON_MODULE ":kill-session",
+      kill_session_cb, NULL, 0, 0, &mon_sub);
+  if (rc != SR_ERR_OK)
+    gnmi_log(GNMI_LOG_WARNING, "monitoring: kill-session RPC subscribe failed: %s",
+             sr_strerror(rc));
 
   gnmi_log(GNMI_LOG_INFO, "Monitoring: operational state provider registered");
   return 0;
@@ -183,7 +239,8 @@ monitoring_notify_session_start(uint64_t id, const char *peer, const char *usern
 }
 
 void
-monitoring_notify_session_end(uint64_t id, const char *peer, const char *reason)
+monitoring_notify_session_end(uint64_t id, const char *peer,
+    const char *reason, uint64_t killed_by)
 {
   if (!mon_sess)
     return;
@@ -198,6 +255,10 @@ monitoring_notify_session_end(uint64_t id, const char *peer, const char *reason)
     lyd_new_path(notif, ctx, NOTIF_SESSION_END "/peer-address", peer, 0, NULL);
   if (notif && reason)
     lyd_new_path(notif, ctx, NOTIF_SESSION_END "/reason", reason, 0, NULL);
+  if (notif && killed_by > 0) {
+    snprintf(buf, sizeof(buf), "%lu", (unsigned long)killed_by);
+    lyd_new_path(notif, ctx, NOTIF_SESSION_END "/killed-by-session-id", buf, 0, NULL);
+  }
 
   sr_session_release_context(mon_sess);
 

@@ -18,7 +18,11 @@ void monitoring_cleanup(void);
 
 /* Session lifecycle notifications */
 void monitoring_notify_session_start(uint64_t id, const char *peer, const char *username);
-void monitoring_notify_session_end(uint64_t id, const char *peer, const char *reason);
+
+/* Notify session end. killed_by is the session ID of the operator that
+ * issued kill-session (0 if not applicable). */
+void monitoring_notify_session_end(uint64_t id, const char *peer,
+    const char *reason, uint64_t killed_by);
 
 /* Confirmed-commit lifecycle notifications.
  * event: "start", "confirm", "cancel", "timeout-rollback" */

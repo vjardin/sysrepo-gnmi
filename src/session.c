@@ -195,7 +195,7 @@ int gnmi_session_reap_idle(gnmi_session_registry_t *reg, unsigned int idle_secs)
                "Session %lu: reaped (idle %us, peer %s, rpcs=%lu, errors=%lu)",
                (unsigned long)s->id, idle, s->peer_addr,
                (unsigned long)s->rpc_count, (unsigned long)s->rpc_errors);
-      monitoring_notify_session_end(s->id, s->peer_addr, "idle-timeout");
+      monitoring_notify_session_end(s->id, s->peer_addr, "idle-timeout", 0);
       *pp = s->next;
       reg->count--;
       gnmi_session_candidate_release(s);
@@ -208,6 +208,36 @@ int gnmi_session_reap_idle(gnmi_session_registry_t *reg, unsigned int idle_secs)
     }
   }
   return reaped;
+}
+
+/* - Kill session -------------------------------------------------- */
+
+int gnmi_session_kill(gnmi_session_registry_t *reg, uint64_t target_id,
+    uint64_t killer_id)
+{
+  if (!reg)
+    return -1;
+
+  struct gnmi_session **pp = &reg->head;
+  while (*pp) {
+    struct gnmi_session *s = *pp;
+    if (s->id == target_id) {
+      gnmi_log(GNMI_LOG_INFO,
+               "Session %lu: killed by session %lu (peer %s)",
+               (unsigned long)s->id, (unsigned long)killer_id,
+               s->peer_addr);
+      monitoring_notify_session_end(s->id, s->peer_addr, "killed", killer_id);
+      *pp = s->next;
+      reg->count--;
+      gnmi_session_candidate_release(s);
+      free(s->peer_addr);
+      free(s->username);
+      free(s);
+      return 0;
+    }
+    pp = &s->next;
+  }
+  return -1;
 }
 
 /* - Per-session candidate datastore ------------------------------- */

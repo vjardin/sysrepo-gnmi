@@ -93,6 +93,13 @@ struct event_base *gnmi_session_registry_evbase(gnmi_session_registry_t *reg);
 const struct gnmi_session *gnmi_session_candidate_holder(
     const gnmi_session_registry_t *reg);
 
+/* Kill a session by ID. Releases candidate, emits session-end
+ * notification with reason "killed" and killed_by_id, then removes
+ * the session from the registry.
+ * Returns 0 on success, -1 if the session was not found. */
+int gnmi_session_kill(gnmi_session_registry_t *reg, uint64_t target_id,
+    uint64_t killer_id);
+
 /* Release candidate datastore for a session (discard + unlock + stop).
  * Safe to call if no candidate is held. */
 void gnmi_session_candidate_release(struct gnmi_session *s);

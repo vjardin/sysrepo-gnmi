@@ -163,6 +163,7 @@ _COMPLIANCE_MAP = [
     ("test_session_lifecycle_notifications", "YANG Notifications - session"),
     ("test_confirmed_commit_notifications", "YANG Notifications - commit"),
     ("test_confirmed_commit_cancel", "YANG Notifications - commit"),
+    ("test_kill_session", "YANG Notifications - kill-session"),
 
     # --- Graceful shutdown ---
     ("test_graceful_shutdown", "Graceful Shutdown"),
