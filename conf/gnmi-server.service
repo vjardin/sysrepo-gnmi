@@ -8,7 +8,8 @@ Type=notify
 # --insecure: no TLS (replace with --key/--cert for production)
 # --syslog: log to syslog (journald captures it)
 # --log-level 2: warning level (0=fatal, 1=error, 2=warn, 3=info, 4=debug)
-ExecStart=/usr/sbin/gnmi_server --insecure --syslog --log-level 2
+PIDFile=/run/gnmi-server.pid
+ExecStart=/usr/sbin/gnmi_server --insecure --syslog --log-level 2 --pid-file /run/gnmi-server.pid
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65536

@@ -5,6 +5,7 @@
  * sysrepo-gnmi: gNMI server for sysrepo (pure C)
  */
 
+#include <errno.h>
 #include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,6 +42,7 @@ static void usage(const char *prog)
     "  -M, --max-sessions N    Max concurrent sessions (0=unlimited, default: 0)\n"
     "  -m, --max-streams N     Max subscribe streams per session (0=unlimited, default: 0)\n"
     "  -Y, --yang-dir DIR      Directory for server YANG modules\n"
+    "  -P, --pid-file FILE     Write PID to file\n"
     "  -v, --version           Print version and exit\n"
     "  -h, --help              Print this help\n",
     prog, GNMI_DEFAULT_BIND);
@@ -60,6 +62,7 @@ static const struct option longopts[] = {
   { "max-sessions",  required_argument, NULL, 'M' },
   { "max-streams",   required_argument, NULL, 'm' },
   { "yang-dir",      required_argument, NULL, 'Y' },
+  { "pid-file",      required_argument, NULL, 'P' },
   { "version",       no_argument,       NULL, 'v' },
   { "help",          no_argument,       NULL, 'h' },
   { NULL, 0, NULL, 0 },
@@ -74,8 +77,9 @@ int main(int argc, char **argv)
   int opt;
   int enable_syslog = 0;
   const char *log_dir = NULL;
+  const char *pid_file = NULL;
 
-  while ((opt = getopt_long(argc, argv, "b:k:c:a:u:p:l:fSL:M:m:Y:vh", longopts, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "b:k:c:a:u:p:l:fSL:M:m:Y:P:vh", longopts, NULL)) != -1) {
     switch (opt) {
     case 'b': cfg.bind_addr = optarg;
       break;
@@ -103,6 +107,8 @@ int main(int argc, char **argv)
       break;
     case 'Y': cfg.yang_dir = optarg;
       break;
+    case 'P': pid_file = optarg;
+      break;
     case 'v': printf("sysrepo-gnmi %s\n", GNMI_SERVER_VERSION);
       return EXIT_SUCCESS;
     case 'h': usage(argv[0]);
@@ -117,6 +123,17 @@ int main(int argc, char **argv)
     gnmi_log_enable_syslog("gnmi-server");
   if (log_dir)
     gnmi_log_data_init(log_dir);
+
+  /* Write PID file */
+  if (pid_file) {
+    FILE *pf = fopen(pid_file, "w");
+    if (pf) {
+      fprintf(pf, "%d\n", (int)getpid());
+      fclose(pf);
+    } else {
+      gnmi_log(GNMI_LOG_WARNING, "Cannot write PID file %s: %s", pid_file, strerror(errno));
+    }
+  }
 
   gnmi_log(GNMI_LOG_INFO, "sysrepo-gnmi %s starting on %s", GNMI_SERVER_VERSION, cfg.bind_addr);
 
@@ -158,5 +175,7 @@ int main(int argc, char **argv)
   gnmi_log(GNMI_LOG_INFO, "Server stopped");
   gnmi_server_destroy(srv);
   sr_disconnect(sr_conn);
+  if (pid_file)
+    unlink(pid_file);
   return EXIT_SUCCESS;
 }
