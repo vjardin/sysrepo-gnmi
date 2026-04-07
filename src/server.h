@@ -7,6 +7,9 @@
 
 #include <stdbool.h>
 #include <sysrepo.h>
+#include <grpc/grpc.h>
+
+struct event_base;  /* forward */
 
 typedef struct gnmi_server gnmi_server_t;
 
@@ -25,3 +28,11 @@ gnmi_server_t *gnmi_server_create(const struct gnmi_config *cfg, sr_conn_ctx_t *
 int  gnmi_server_run(gnmi_server_t *srv);
 void gnmi_server_shutdown(gnmi_server_t *srv);
 void gnmi_server_destroy(gnmi_server_t *srv);
+
+/* Accessors for internal server state (used by gnmi_service/subscribe) */
+grpc_server            *gnmi_server_get_grpc(gnmi_server_t *srv);
+grpc_completion_queue  *gnmi_server_get_cq(gnmi_server_t *srv);
+sr_conn_ctx_t          *gnmi_server_get_sr_conn(gnmi_server_t *srv);
+bool                    gnmi_server_is_shutting_down(gnmi_server_t *srv);
+struct event_base      *gnmi_server_get_evbase(gnmi_server_t *srv);
+const char             *gnmi_server_get_nacm_user(gnmi_server_t *srv);

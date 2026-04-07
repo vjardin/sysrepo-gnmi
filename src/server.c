@@ -201,7 +201,6 @@ gnmi_server_t *gnmi_server_create(const struct gnmi_config *cfg, sr_conn_ctx_t *
   grpc_server_start(srv->grpc_srv);
 
   /* Arm all RPC methods to accept calls (must be after start) */
-  extern void gnmi_service_arm_all(gnmi_server_t *srv);
   gnmi_service_arm_all(srv);
 
   /* Confirmed-commit state machine (timer on the shared event_base) */

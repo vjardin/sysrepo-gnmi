@@ -55,3 +55,9 @@ int gnmi_nacm_session_start(sr_conn_ctx_t *conn, sr_datastore_t ds, sr_session_c
 
 /* Drain: re-arm request_registered_call for a given method index */
 void gnmi_service_rearm(gnmi_server_t *srv, int method_idx);
+
+/* Arm all RPC methods to accept calls (called after grpc_server_start) */
+void gnmi_service_arm_all(gnmi_server_t *srv);
+
+/* Get the registered method handle by index */
+void *gnmi_service_get_method_handle(int idx);

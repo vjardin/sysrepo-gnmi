@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 
 #include "subscribe.h"
+#include "server.h"
 #include "xpath.h"
 #include "encode.h"
 #include "log.h"
@@ -19,14 +20,6 @@
 #include <libyang/libyang.h>
 
 #include "gnmi.pb-c.h"
-
-/* - Accessors (from server.c) ------------------------------------- */
-
-extern grpc_server *gnmi_server_get_grpc(gnmi_server_t *srv);
-extern grpc_completion_queue *gnmi_server_get_cq(gnmi_server_t *srv);
-extern sr_conn_ctx_t *gnmi_server_get_sr_conn(gnmi_server_t *srv);
-extern bool gnmi_server_is_shutting_down(gnmi_server_t *srv);
-extern struct event_base *gnmi_server_get_evbase(gnmi_server_t *srv);
 
 /* - Forward declarations ------------------------------------------ */
 
@@ -1146,7 +1139,6 @@ void subscribe_arm(gnmi_server_t *srv, int method_idx)
   sctx->state = STREAM_INIT;
   grpc_metadata_array_init(&sctx->base.md_recv);
 
-  extern void *gnmi_service_get_method_handle(int idx);
   void *handle = gnmi_service_get_method_handle(method_idx);
   if (!handle) {
     gnmi_log(GNMI_LOG_ERROR, "Subscribe: no method handle");

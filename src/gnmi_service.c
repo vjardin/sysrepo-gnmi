@@ -4,6 +4,7 @@
  */
 
 #include "gnmi_service.h"
+#include "server.h"
 #include "capabilities.h"
 #include "get.h"
 #include "set.h"
@@ -18,13 +19,6 @@
 #include <grpc/grpc.h>
 #include <grpc/byte_buffer_reader.h>
 #include <grpc/support/alloc.h>
-
-/* - Accessors (defined in server.c) ------------------------------- */
-
-extern grpc_server *gnmi_server_get_grpc(gnmi_server_t *srv);
-extern grpc_completion_queue *gnmi_server_get_cq(gnmi_server_t *srv);
-extern sr_conn_ctx_t *gnmi_server_get_sr_conn(gnmi_server_t *srv);
-extern bool gnmi_server_is_shutting_down(gnmi_server_t *srv);
 
 /* - protobuf-c <-> grpc_byte_buffer bridge ------------------------ */
 
@@ -256,7 +250,6 @@ int gnmi_service_init(gnmi_server_t *srv)
   }
 
   /* Store NACM user for session creation in RPC handlers */
-  extern const char *gnmi_server_get_nacm_user(gnmi_server_t *srv);
   nacm_user = gnmi_server_get_nacm_user(srv);
 
   /* Must arm AFTER grpc_server_start, so we return and let
