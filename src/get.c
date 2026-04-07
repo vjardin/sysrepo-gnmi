@@ -269,26 +269,7 @@ cleanup:
         continue;
       /* Free updates */
       for (size_t j = 0; j < n->n_update; j++) {
-        Gnmi__Update *u = n->update[j];
-        if (!u)
-          continue;
-        if (u->path) {
-          gnmi_path_free_elems(u->path);
-          free(u->path);
-        }
-        if (u->val) {
-          switch (u->val->value_case) {
-          case GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL:
-            free(u->val->json_ietf_val.data); break;
-          case GNMI__TYPED_VALUE__VALUE_ASCII_VAL:
-            free(u->val->ascii_val); break;
-          case GNMI__TYPED_VALUE__VALUE_STRING_VAL:
-            free(u->val->string_val); break;
-          default: break;
-          }
-          free(u->val);
-        }
-        free(u);
+        gnmi_update_free(n->update[j]);
       }
       free(n->update);
       /* Free prefix if allocated */

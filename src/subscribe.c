@@ -172,18 +172,7 @@ build_subscribe_data(struct stream_ctx *sctx, Gnmi__SubscriptionList *sublist)
 
   /* Cleanup */
   for (size_t i = 0; i < total_updates; i++) {
-    Gnmi__Update *u = all_updates[i];
-    if (u->path) {
-      gnmi_path_free_elems(u->path);
-      free(u->path);
-    }
-    if (u->val) {
-      if (u->val->value_case ==
-          GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL)
-        free(u->val->json_ietf_val.data);
-      free(u->val);
-    }
-    free(u);
+    gnmi_update_free(all_updates[i]);
   }
   free(all_updates);
 
@@ -778,16 +767,8 @@ send_now:;
   int qrc = send_queue_push(sctx, gnmi_pack((ProtobufCMessage *)&resp));
 
   /* Cleanup */
-  for (uint32_t j = 0; j < set->count; j++) {
-    Gnmi__Update *u = notif.update[j];
-    if (u->path) { gnmi_path_free_elems(u->path); free(u->path); }
-    if (u->val) {
-      if (u->val->value_case == GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL)
-        free(u->val->json_ietf_val.data);
-      free(u->val);
-    }
-    free(u);
-  }
+  for (uint32_t j = 0; j < set->count; j++)
+    gnmi_update_free(notif.update[j]);
   free(notif.update);
   ly_set_free(set, NULL);
   sr_release_data(sr_data);
@@ -814,14 +795,7 @@ static void stream_flush_aggregated(struct stream_ctx *sctx)
 
   /* Free updates (ownership was with aggregation buffer) */
   for (size_t i = 0; i < sctx->agg_n_updates; i++) {
-    Gnmi__Update *u = sctx->agg_updates[i];
-    if (u->path) { gnmi_path_free_elems(u->path); free(u->path); }
-    if (u->val) {
-      if (u->val->value_case == GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL)
-        free(u->val->json_ietf_val.data);
-      free(u->val);
-    }
-    free(u);
+    gnmi_update_free(sctx->agg_updates[i]);
   }
   free(sctx->agg_updates);
   sctx->agg_updates = NULL;
@@ -1021,17 +995,8 @@ static void stream_queue_delta(struct stream_ctx *sctx, struct sub_entry *e)
   int qrc = send_queue_push(sctx, gnmi_pack((ProtobufCMessage *)&resp));
 
   /* Cleanup */
-  for (size_t i = 0; i < n_updates; i++) {
-    Gnmi__Update *u = updates[i];
-    if (u->path) { gnmi_path_free_elems(u->path); free(u->path); }
-    if (u->val) {
-      if (u->val->value_case ==
-          GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL)
-        free(u->val->json_ietf_val.data);
-      free(u->val);
-    }
-    free(u);
-  }
+  for (size_t i = 0; i < n_updates; i++)
+    gnmi_update_free(updates[i]);
   free(updates);
 
   for (size_t i = 0; i < n_deletes; i++) {
@@ -1119,14 +1084,7 @@ static void stream_free(struct stream_ctx *sctx)
 
   /* Free aggregated updates if any */
   for (size_t i = 0; i < sctx->agg_n_updates; i++) {
-    Gnmi__Update *u = sctx->agg_updates[i];
-    if (u->path) { gnmi_path_free_elems(u->path); free(u->path); }
-    if (u->val) {
-      if (u->val->value_case == GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL)
-        free(u->val->json_ietf_val.data);
-      free(u->val);
-    }
-    free(u);
+    gnmi_update_free(sctx->agg_updates[i]);
   }
   free(sctx->agg_updates);
 

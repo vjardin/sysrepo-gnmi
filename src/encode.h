@@ -27,6 +27,14 @@ grpc_status_code decode_json_ietf(sr_session_ctx_t *sess, const char *xpath, con
           struct lyd_node **out,
           char **err_msg);
 
+/* Free a dynamically allocated Gnmi__TypedValue's inner data.
+ * Handles all encoding types (json_ietf_val, ascii_val, string_val, etc).
+ * Does NOT free the val struct itself. */
+void gnmi_typed_value_free(Gnmi__TypedValue *val);
+
+/* Free a dynamically allocated Gnmi__Update (path + val + struct). */
+void gnmi_update_free(Gnmi__Update *u);
+
 /* Decode + attach NETCONF operation metadata for Set operations.
  * operation is "merge", "replace", or "remove".
  * Returns gRPC status code. *out is the root of the edit tree. */

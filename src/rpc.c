@@ -168,9 +168,7 @@ grpc_status_code handle_rpc(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
 
 cleanup:
   if (resp.val) {
-    if (resp.val->value_case ==
-        GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL)
-      free(resp.val->json_ietf_val.data);
+    gnmi_typed_value_free(resp.val);
     free(resp.val);
   }
   if (output)

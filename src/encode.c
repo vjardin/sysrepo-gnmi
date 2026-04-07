@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 
 #include "encode.h"
+#include "xpath.h"
 #include "log.h"
 #include "compat.h"
 
@@ -285,6 +286,40 @@ grpc_status_code encode_node(Gnmi__Encoding encoding, const struct lyd_node *nod
       *err_msg = strdup("Unsupported encoding");
     return GRPC_STATUS_UNIMPLEMENTED;
   }
+}
+
+/* - Common cleanup helpers ---------------------------------------- */
+
+void gnmi_typed_value_free(Gnmi__TypedValue *val)
+{
+  if (!val)
+    return;
+  switch (val->value_case) {
+  case GNMI__TYPED_VALUE__VALUE_JSON_IETF_VAL:
+    free(val->json_ietf_val.data); break;
+  case GNMI__TYPED_VALUE__VALUE_JSON_VAL:
+    free(val->json_val.data); break;
+  case GNMI__TYPED_VALUE__VALUE_ASCII_VAL:
+    free(val->ascii_val); break;
+  case GNMI__TYPED_VALUE__VALUE_STRING_VAL:
+    free(val->string_val); break;
+  default: break;
+  }
+}
+
+void gnmi_update_free(Gnmi__Update *u)
+{
+  if (!u)
+    return;
+  if (u->path) {
+    gnmi_path_free_elems(u->path);
+    free(u->path);
+  }
+  if (u->val) {
+    gnmi_typed_value_free(u->val);
+    free(u->val);
+  }
+  free(u);
 }
 
 /* - decode_json_ietf: JSON string -> lyd_node tree ----------------- */
