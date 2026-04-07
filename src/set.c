@@ -30,12 +30,35 @@
  * sr_unlock() resets candidate to mirror running automatically.
  */
 
-static sr_session_ctx_t *candidate_sess;
+/* Auto-discard candidate after 5 minutes of inactivity */
+#define CANDIDATE_IDLE_TIMEOUT_SEC  300
 
-static sr_session_ctx_t *candidate_acquire(sr_conn_ctx_t *conn)
+static sr_session_ctx_t *candidate_sess;
+static struct event *candidate_idle_timer;
+static struct event_base *candidate_evbase;
+static void candidate_release(void);
+
+static void candidate_idle_cb(evutil_socket_t fd, short what, void *arg)
 {
-  if (candidate_sess)
+  (void)fd; (void)what; (void)arg;
+  if (!candidate_sess)
+    return;
+  gnmi_log(GNMI_LOG_WARNING, "Candidate: idle timeout, discarding uncommitted changes");
+  sr_discard_changes(candidate_sess);
+  candidate_release();
+}
+
+static sr_session_ctx_t *candidate_acquire(sr_conn_ctx_t *conn,
+    struct event_base *evbase)
+{
+  if (candidate_sess) {
+    /* Reset idle timer on each access */
+    if (candidate_idle_timer) {
+      struct timeval tv = { .tv_sec = CANDIDATE_IDLE_TIMEOUT_SEC };
+      evtimer_add(candidate_idle_timer, &tv);
+    }
     return candidate_sess;
+  }
 
   int rc = sr_session_start(conn, SR_DS_CANDIDATE, &candidate_sess);
   if (rc != SR_ERR_OK)
@@ -49,6 +72,13 @@ static sr_session_ctx_t *candidate_acquire(sr_conn_ctx_t *conn)
     return NULL;
   }
 
+  /* Start idle timeout */
+  if (evbase) {
+    candidate_idle_timer = evtimer_new(evbase, candidate_idle_cb, NULL);
+    struct timeval tv = { .tv_sec = CANDIDATE_IDLE_TIMEOUT_SEC };
+    evtimer_add(candidate_idle_timer, &tv);
+  }
+
   gnmi_log(GNMI_LOG_DEBUG, "Candidate: session created and locked");
   return candidate_sess;
 }
@@ -57,11 +87,31 @@ static void candidate_release(void)
 {
   if (!candidate_sess)
     return;
+  /* Cancel idle timer */
+  if (candidate_idle_timer) {
+    evtimer_del(candidate_idle_timer);
+    event_free(candidate_idle_timer);
+    candidate_idle_timer = NULL;
+  }
   /* sr_unlock resets candidate to mirror running */
   sr_unlock(candidate_sess, NULL);
   sr_session_stop(candidate_sess);
   candidate_sess = NULL;
   gnmi_log(GNMI_LOG_DEBUG, "Candidate: session unlocked and released");
+}
+
+void candidate_cleanup(void)
+{
+  if (candidate_sess) {
+    gnmi_log(GNMI_LOG_INFO, "Candidate: releasing on shutdown");
+    sr_discard_changes(candidate_sess);
+  }
+  candidate_release();
+}
+
+void candidate_init(struct event_base *evbase)
+{
+  candidate_evbase = evbase;
 }
 
 /* - Result tracking ----------------------------------------------- */
@@ -374,7 +424,7 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
   /* For candidate edits, use the persistent locked session */
   int rc;
   if (use_candidate) {
-    sess = candidate_acquire(sr_conn);
+    sess = candidate_acquire(sr_conn, candidate_evbase);
     if (!sess) {
       *status_msg = strdup("Failed to acquire candidate session");
       ret = GRPC_STATUS_ABORTED;

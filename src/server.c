@@ -6,6 +6,7 @@
 #include "server.h"
 #include "gnmi_service.h"
 #include "confirm.h"
+#include "set.h"
 #include "log.h"
 
 #include <stdlib.h>
@@ -208,6 +209,9 @@ gnmi_server_t *gnmi_server_create(const struct gnmi_config *cfg, sr_conn_ctx_t *
   if (cs)
     confirm_state_set_global(cs);
 
+  /* Candidate datastore idle timeout support */
+  candidate_init(srv->evbase);
+
   /* CQ poll timer (one-shot, re-armed adaptively in callback) */
   struct timeval tv = { .tv_sec = 0, .tv_usec = CQ_POLL_FAST_US };
   srv->ev_cq_poll = evtimer_new(srv->evbase, on_cq_poll_cb, srv);
@@ -258,6 +262,9 @@ void gnmi_server_destroy(gnmi_server_t *srv)
     event_del(srv->ev_sigint);
     event_free(srv->ev_sigint);
   }
+
+  /* Release candidate session if held */
+  candidate_cleanup();
 
   /* Destroy confirmed-commit state */
   confirm_state_t *cs = confirm_state_get_global();
