@@ -75,6 +75,12 @@ jobs:
             libprotobuf-c-dev protobuf-c-compiler \
             libevent-dev libcjson-dev libpcre2-dev \
             python3-venv
+      - name: Install gnmic
+        run: |
+          GNMIC_DEB_URL=$(curl -s https://api.github.com/repos/openconfig/gnmic/releases/latest \
+            | python3 -c "import sys,json; assets=json.load(sys.stdin)['assets']; print([a['browser_download_url'] for a in assets if a['name'].endswith('Linux_x86_64.deb')][0])")
+          curl -sL "$GNMIC_DEB_URL" -o /tmp/gnmic.deb
+          sudo dpkg -i /tmp/gnmic.deb
       - name: Create NACM test user
         run: sudo useradd -r -s /usr/sbin/nologin nacmtestuser 2>/dev/null || true
       - name: Download meson subprojects
