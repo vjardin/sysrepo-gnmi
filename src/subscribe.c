@@ -70,7 +70,8 @@ build_subscribe_data(struct stream_ctx *sctx, Gnmi__SubscriptionList *sublist)
 {
   sr_conn_ctx_t *sr_conn = gnmi_server_get_sr_conn(sctx->base.srv);
   sr_session_ctx_t *sess = NULL;
-  int rc = sr_session_start(sr_conn, SR_DS_OPERATIONAL, &sess);
+  int rc = gnmi_nacm_session_start_as(sr_conn, SR_DS_OPERATIONAL,
+    sctx->stream_user, &sess);
   if (rc != SR_ERR_OK)
     return -1;
 
@@ -294,6 +295,20 @@ static void step_send_initial_metadata(struct stream_ctx *sctx, bool success)
   if (!success) {
     stream_free(sctx);
     return;
+  }
+
+  /* Extract per-stream username from client metadata (gnmic --username).
+   * Stored in stream_ctx so concurrent streams keep their own identity. */
+  for (size_t i = 0; i < sctx->base.md_recv.count; i++) {
+    grpc_slice key = sctx->base.md_recv.metadata[i].key;
+    if (grpc_slice_eq(key, grpc_slice_from_static_string("username"))) {
+      grpc_slice val = sctx->base.md_recv.metadata[i].value;
+      sctx->stream_user = strndup(
+        (const char *)GRPC_SLICE_START_PTR(val), GRPC_SLICE_LENGTH(val));
+      if (sctx->stream_user)
+        gnmi_log(GNMI_LOG_DEBUG, "Subscribe metadata username: %s", sctx->stream_user);
+      break;
+    }
   }
 
   /* Re-arm to accept next Subscribe call */
@@ -580,8 +595,9 @@ static void stream_arm_subscriptions(struct stream_ctx *sctx)
 
   sctx->allow_aggregation = sl->allow_aggregation;
 
-  /* Create a session for STREAM mode data fetching */
-  int rc = sr_session_start(sr_conn, SR_DS_OPERATIONAL, &sctx->sr_sess);
+  /* Create a session for STREAM mode data fetching (with per-stream NACM user) */
+  int rc = gnmi_nacm_session_start_as(sr_conn, SR_DS_OPERATIONAL,
+    sctx->stream_user, &sctx->sr_sess);
   if (rc != SR_ERR_OK) {
     gnmi_log(GNMI_LOG_ERROR, "Subscribe STREAM: sr_session_start failed: %s", sr_strerror(rc));
     stream_close(sctx, GRPC_STATUS_INTERNAL, "Failed to start sysrepo session");
@@ -1115,6 +1131,7 @@ static void stream_free(struct stream_ctx *sctx)
   if (sctx->orig_req)
     protobuf_c_message_free_unpacked( (ProtobufCMessage *)sctx->orig_req, NULL);
   free(sctx->close_msg);
+  free(sctx->stream_user);
 
   grpc_metadata_array_destroy(&sctx->base.md_recv);
   if (sctx->base.call)

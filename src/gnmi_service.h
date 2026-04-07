@@ -56,6 +56,12 @@ int gnmi_nacm_session_start(sr_conn_ctx_t *conn, sr_datastore_t ds, sr_session_c
 /* Drain: re-arm request_registered_call for a given method index */
 void gnmi_service_rearm(gnmi_server_t *srv, int method_idx);
 
+/* Start a sysrepo session with an explicit NACM user.
+ * If user is NULL, falls back to the global -u flag.
+ * Used by handlers that receive per-RPC username from gRPC metadata. */
+int gnmi_nacm_session_start_as(sr_conn_ctx_t *conn, sr_datastore_t ds,
+    const char *user, sr_session_ctx_t **sess);
+
 /* Arm all RPC methods to accept calls (called after grpc_server_start) */
 void gnmi_service_arm_all(gnmi_server_t *srv);
 

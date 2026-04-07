@@ -830,3 +830,22 @@ def test_get_proto_encoding_container(gnmi_stub):
     val = resp.notification[0].update[0].val
     # Container should fall back to json_ietf_val
     assert len(val.json_ietf_val) > 0
+
+
+def test_get_with_grpc_metadata_username(gnmi_stub, grpc_channel):
+    """Get request with username in gRPC metadata.
+
+    Equivalent to: "Get with gRPC metadata username" [get-metadata]
+    Server extracts username from gRPC metadata for NACM.
+    """
+    # Create a stub that sends username metadata
+    path = xpath_to_path("/gnmi-server-test:test-state")
+    req = gnmi_pb2.GetRequest(
+        path=[path],
+        encoding=gnmi_pb2.JSON_IETF,
+    )
+    # Send with metadata
+    metadata = [("username", "metadatauser")]
+    resp = gnmi_stub.Get(req, timeout=10, metadata=metadata)
+    assert len(resp.notification) == 1
+    # The server logs "Metadata username: metadatauser" at DEBUG level

@@ -15,7 +15,7 @@
 
 #include "gnmi.pb-c.h"
 
-grpc_status_code handle_capabilities(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb,
+grpc_status_code handle_capabilities(sr_conn_ctx_t *sr_conn, const char *user, grpc_byte_buffer *request_bb,
              grpc_byte_buffer **response_bb,
              char **status_msg)
 {
@@ -29,7 +29,7 @@ grpc_status_code handle_capabilities(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *r
   grpc_status_code ret = GRPC_STATUS_INTERNAL;
 
   /* Create a temporary session (with NACM user if configured) */
-  int rc = gnmi_nacm_session_start(sr_conn, SR_DS_RUNNING, &sess);
+  int rc = gnmi_nacm_session_start_as(sr_conn, SR_DS_RUNNING, user, &sess);
   if (rc != SR_ERR_OK) {
     *status_msg = strdup("Failed to start sysrepo session");
     return GRPC_STATUS_INTERNAL;

@@ -24,7 +24,7 @@
 
 #include "gnmi.pb-c.h"
 
-grpc_status_code handle_rpc(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb, grpc_byte_buffer **response_bb,
+grpc_status_code handle_rpc(sr_conn_ctx_t *sr_conn, const char *user, grpc_byte_buffer *request_bb, grpc_byte_buffer **response_bb,
           char **status_msg)
 {
   Gnmi__RpcRequest *req = NULL;
@@ -69,7 +69,7 @@ grpc_status_code handle_rpc(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
   gnmi_log(GNMI_LOG_DEBUG, "Rpc RPC (%s) timeout %ums", xpath, timeout_ms);
 
   /* Create session (with NACM user if configured) */
-  int rc = gnmi_nacm_session_start(sr_conn, SR_DS_RUNNING, &sess);
+  int rc = gnmi_nacm_session_start_as(sr_conn, SR_DS_RUNNING, user, &sess);
   if (rc != SR_ERR_OK) {
     *status_msg = strdup("Failed to start sysrepo session");
     goto cleanup;

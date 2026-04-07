@@ -58,6 +58,9 @@ struct stream_ctx {
   struct call_ctx  base;
   int              method_idx;
 
+  /* Per-stream NACM user (extracted from gRPC metadata at accept time) */
+  char            *stream_user;
+
   /* Current recv buffer */
   grpc_byte_buffer *recv_msg;
 

@@ -51,8 +51,8 @@ ProtobufCMessage *gnmi_unpack(const ProtobufCMessageDescriptor *desc, grpc_byte_
 
 /* - RPC method table ---------------------------------------------- */
 
-typedef grpc_status_code (*unary_handler_fn)(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *req, grpc_byte_buffer **resp,
-               char **status_msg);
+typedef grpc_status_code (*unary_handler_fn)(sr_conn_ctx_t *sr_conn, const char *user,
+               grpc_byte_buffer *req, grpc_byte_buffer **resp, char **status_msg);
 
 struct rpc_method {
   const char       *path;
@@ -71,6 +71,8 @@ static struct rpc_method methods[] = {
 };
 
 #define N_METHODS (sizeof(methods) / sizeof(methods[0]))
+
+static const char *extract_metadata_username(const grpc_metadata_array *md);
 
 /* - Unary RPC state machine --------------------------------------- */
 
@@ -118,8 +120,14 @@ static void step_got_call(struct call_ctx *base, bool success)
 
   struct rpc_method *m = &methods[ctx->method_idx];
   gnmi_log(GNMI_LOG_DEBUG, "RPC %s received", m->path);
+
+  /* Extract per-RPC username from client metadata (gnmic --username) */
+  const char *rpc_user = extract_metadata_username(&base->md_recv);
+  if (rpc_user)
+    gnmi_log(GNMI_LOG_DEBUG, "RPC metadata username: %s", rpc_user);
+
   if (m->handler) {
-    code = m->handler(gnmi_server_get_sr_conn(base->srv), base->request_payload, &response_bb, &status_msg);
+    code = m->handler(gnmi_server_get_sr_conn(base->srv), rpc_user, base->request_payload, &response_bb, &status_msg);
   } else {
     code = GRPC_STATUS_UNIMPLEMENTED;
     status_msg = strdup("Not implemented");
@@ -230,6 +238,17 @@ void gnmi_service_rearm(gnmi_server_t *srv, int method_idx)
 /* Global NACM user, set once at init from server config */
 static const char *nacm_user;
 
+/* Extract "username" from gRPC client metadata (sent by gnmic --username). */
+static const char *extract_metadata_username(const grpc_metadata_array *md)
+{
+  for (size_t i = 0; i < md->count; i++) {
+    grpc_slice key = md->metadata[i].key;
+    if (grpc_slice_eq(key, grpc_slice_from_static_string("username")))
+      return (const char *)GRPC_SLICE_START_PTR(md->metadata[i].value);
+  }
+  return NULL;
+}
+
 /* - Init: register methods and arm -------------------------------- */
 
 int gnmi_service_init(gnmi_server_t *srv)
@@ -261,24 +280,25 @@ int gnmi_service_init(gnmi_server_t *srv)
 
 int gnmi_session_start(gnmi_server_t *srv, sr_datastore_t ds, sr_session_ctx_t **sess)
 {
-  int rc = sr_session_start(gnmi_server_get_sr_conn(srv), ds, sess);
-  if (rc != SR_ERR_OK)
-    return rc;
-
-  if (nacm_user && nacm_user[0])
-    sr_session_set_user(*sess, nacm_user);
-
-  return SR_ERR_OK;
+  return gnmi_nacm_session_start_as(gnmi_server_get_sr_conn(srv), ds, NULL, sess);
 }
 
 int gnmi_nacm_session_start(sr_conn_ctx_t *conn, sr_datastore_t ds, sr_session_ctx_t **sess)
+{
+  return gnmi_nacm_session_start_as(conn, ds, NULL, sess);
+}
+
+int gnmi_nacm_session_start_as(sr_conn_ctx_t *conn, sr_datastore_t ds,
+    const char *user, sr_session_ctx_t **sess)
 {
   int rc = sr_session_start(conn, ds, sess);
   if (rc != SR_ERR_OK)
     return rc;
 
-  if (nacm_user && nacm_user[0])
-    sr_session_set_user(*sess, nacm_user);
+  /* Explicit user takes precedence, then -u flag */
+  const char *effective = (user && user[0]) ? user : nacm_user;
+  if (effective && effective[0])
+    sr_session_set_user(*sess, effective);
 
   return SR_ERR_OK;
 }
