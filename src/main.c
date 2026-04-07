@@ -40,6 +40,7 @@ static void usage(const char *prog)
     "  -L, --log-dir DIR       Transaction data log directory\n"
     "  -M, --max-sessions N    Max concurrent sessions (0=unlimited, default: 0)\n"
     "  -m, --max-streams N     Max subscribe streams per session (0=unlimited, default: 0)\n"
+    "  -Y, --yang-dir DIR      Directory for server YANG modules\n"
     "  -v, --version           Print version and exit\n"
     "  -h, --help              Print this help\n",
     prog, GNMI_DEFAULT_BIND);
@@ -58,6 +59,7 @@ static const struct option longopts[] = {
   { "log-dir",       required_argument, NULL, 'L' },
   { "max-sessions",  required_argument, NULL, 'M' },
   { "max-streams",   required_argument, NULL, 'm' },
+  { "yang-dir",      required_argument, NULL, 'Y' },
   { "version",       no_argument,       NULL, 'v' },
   { "help",          no_argument,       NULL, 'h' },
   { NULL, 0, NULL, 0 },
@@ -73,7 +75,7 @@ int main(int argc, char **argv)
   int enable_syslog = 0;
   const char *log_dir = NULL;
 
-  while ((opt = getopt_long(argc, argv, "b:k:c:a:u:p:l:fSL:M:m:vh", longopts, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "b:k:c:a:u:p:l:fSL:M:m:Y:vh", longopts, NULL)) != -1) {
     switch (opt) {
     case 'b': cfg.bind_addr = optarg;
       break;
@@ -98,6 +100,8 @@ int main(int argc, char **argv)
     case 'M': cfg.max_sessions = atoi(optarg);
       break;
     case 'm': cfg.max_streams_per_session = atoi(optarg);
+      break;
+    case 'Y': cfg.yang_dir = optarg;
       break;
     case 'v': printf("sysrepo-gnmi %s\n", GNMI_SERVER_VERSION);
       return EXIT_SUCCESS;

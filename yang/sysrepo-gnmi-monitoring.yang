@@ -1,0 +1,91 @@
+module sysrepo-gnmi-monitoring {
+  yang-version 1.1;
+  namespace "urn:sysrepo:gnmi:monitoring";
+  prefix sgm;
+
+  import ietf-yang-types {
+    prefix yang;
+  }
+
+  description
+    "Operational state for the sysrepo-gnmi server.
+     Exposes active sessions, subscribe streams, and RPC counters.";
+
+  revision 2026-04-07 {
+    description
+      "Initial revision.";
+  }
+
+  container server-state {
+    config false;
+
+    leaf uptime {
+      type uint64;
+      units "seconds";
+      description
+        "Seconds since the server started.";
+    }
+
+    leaf active-sessions {
+      type uint32;
+      description
+        "Number of currently tracked client sessions.";
+    }
+
+    leaf active-streams {
+      type uint32;
+      description
+        "Total number of active subscribe streams across all sessions.";
+    }
+
+    container counters {
+      leaf total-rpcs {
+        type yang:counter64;
+        description
+          "Total RPCs received across all sessions.";
+      }
+      leaf failed-rpcs {
+        type yang:counter64;
+        description
+          "Total RPCs that returned a non-OK status.";
+      }
+    }
+
+    list session {
+      key "id";
+      description
+        "Active gNMI client sessions.";
+
+      leaf id {
+        type uint64;
+        description
+          "Unique session identifier.";
+      }
+      leaf peer-address {
+        type string;
+        description
+          "gRPC peer address (IP:port).";
+      }
+      leaf username {
+        type string;
+        description
+          "NACM username (from metadata or TLS certificate).";
+      }
+      leaf active-streams {
+        type uint32;
+        description
+          "Number of active subscribe streams for this session.";
+      }
+      leaf rpc-count {
+        type yang:counter64;
+        description
+          "Total RPCs received on this session.";
+      }
+      leaf rpc-errors {
+        type yang:counter64;
+        description
+          "RPCs that returned non-OK status on this session.";
+      }
+    }
+  }
+}

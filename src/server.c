@@ -8,6 +8,7 @@
 #include "subscribe.h"
 #include "confirm.h"
 #include "session.h"
+#include "monitoring.h"
 #include "log.h"
 
 #include <stdlib.h>
@@ -33,6 +34,7 @@ struct gnmi_server {
   struct event           *ev_session_reap;  /* periodic idle session reaper */
   struct stream_ctx      *active_streams;   /* linked list of active subscribe streams */
   struct event           *ev_drain;         /* drain timer for graceful shutdown */
+  struct timespec         start_time;       /* for uptime calculation */
 };
 
 /* Adaptive CQ polling */
@@ -175,6 +177,7 @@ gnmi_server_t *gnmi_server_create(const struct gnmi_config *cfg, sr_conn_ctx_t *
 
   srv->sr_conn = sr_conn;
   srv->nacm_user = cfg->username;  /* NULL if not set */
+  clock_gettime(CLOCK_MONOTONIC, &srv->start_time);
 
   /* Initialize libevent with pthread support (for event_active) */
   evthread_use_pthreads();
@@ -274,6 +277,9 @@ gnmi_server_t *gnmi_server_create(const struct gnmi_config *cfg, sr_conn_ctx_t *
   struct timeval reap_tv = { .tv_sec = SESSION_REAP_INTERVAL_SEC };
   evtimer_add(srv->ev_session_reap, &reap_tv);
 
+  /* Operational state monitoring (non-fatal if it fails) */
+  monitoring_init(srv, sr_conn, cfg->yang_dir);
+
   return srv;
 
 err:
@@ -357,6 +363,9 @@ void gnmi_server_destroy(gnmi_server_t *srv)
     gnmi_session_registry_destroy(srv->sessions);
   }
 
+  /* Monitoring cleanup */
+  monitoring_cleanup();
+
   /* Destroy confirmed-commit state */
   confirm_state_t *cs = confirm_state_get_global();
   if (cs) {
@@ -414,4 +423,11 @@ const char *gnmi_server_get_nacm_user(gnmi_server_t *srv)
 gnmi_session_registry_t *gnmi_server_get_sessions(gnmi_server_t *srv)
 {
   return srv->sessions;
+}
+
+uint64_t gnmi_server_uptime(gnmi_server_t *srv)
+{
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  return (uint64_t)(now.tv_sec - srv->start_time.tv_sec);
 }

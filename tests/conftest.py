@@ -157,6 +157,9 @@ _COMPLIANCE_MAP = [
     # --- Stress / performance
     ("test_stress", "Stress Tests"),
 
+    # --- Monitoring ---
+    ("test_monitoring", "Operational Monitoring"),
+
     # --- Graceful shutdown ---
     ("test_graceful_shutdown", "Graceful Shutdown"),
 
@@ -221,6 +224,7 @@ _SECTION_ORDER = [
     # Other
     "gNMI RPC/Action",
     "Stress Tests",
+    "Operational Monitoring",
     "Graceful Shutdown",
     "Interop gnmic",
 ]
@@ -450,8 +454,11 @@ def gnmi_server(gnmi_env, seed_oper):
     server_log_path = os.path.join(build_dir, "gnmi_server.log")
     server_log = open(server_log_path, "w")
 
+    # Locate server YANG modules directory (yang/ in source root)
+    yang_dir = os.path.join(os.path.dirname(__file__), "..", "yang")
+
     # Optionally run under valgrind or strace
-    cmd = [binary, "-f", "-b", GNMI_BIND, "-l", "4"]
+    cmd = [binary, "-f", "-b", GNMI_BIND, "-l", "4", "-Y", yang_dir]
     use_valgrind = os.environ.get("GNMI_VALGRIND", "")
     use_strace = os.environ.get("GNMI_STRACE", "")
     if use_valgrind:

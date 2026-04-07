@@ -121,6 +121,7 @@ gnmi_src = files(
   'src/subscribe.c',
   'src/rpc.c',
   'src/confirm.c',
+  'src/monitoring.c',
 )
 
 gnmi_server = executable('gnmi_server',

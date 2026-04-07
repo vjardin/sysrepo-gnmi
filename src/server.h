@@ -25,6 +25,7 @@ struct gnmi_config {
   bool        insecure;
   int         max_sessions;           /* 0 = unlimited */
   int         max_streams_per_session; /* 0 = unlimited */
+  const char *yang_dir;               /* directory for server YANG modules */
 };
 
 struct stream_ctx;  /* forward */
@@ -42,6 +43,9 @@ bool                    gnmi_server_is_shutting_down(gnmi_server_t *srv);
 struct event_base      *gnmi_server_get_evbase(gnmi_server_t *srv);
 const char             *gnmi_server_get_nacm_user(gnmi_server_t *srv);
 gnmi_session_registry_t *gnmi_server_get_sessions(gnmi_server_t *srv);
+
+/* Server uptime in seconds */
+uint64_t gnmi_server_uptime(gnmi_server_t *srv);
 
 /* Active stream tracking for graceful shutdown */
 void gnmi_server_stream_register(gnmi_server_t *srv, struct stream_ctx *sctx);
