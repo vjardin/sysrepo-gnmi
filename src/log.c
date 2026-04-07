@@ -20,6 +20,8 @@
 #include <cjson/cJSON.h>
 
 static enum gnmi_log_level current_level = GNMI_LOG_WARNING;
+static enum gnmi_log_level sr_level;   /* sysrepo subsystem level */
+static enum gnmi_log_level ly_level;   /* libyang subsystem level */
 static int use_syslog;
 static char *txn_log_dir;
 
@@ -47,13 +49,25 @@ static const int syslog_prio[] = {
   [GNMI_LOG_DEBUG]   = LOG_DEBUG,
 };
 
-void gnmi_log_init(int level)
+static int clamp_level(int level)
 {
   if (level < GNMI_LOG_FATAL)
-    level = GNMI_LOG_FATAL;
+    return GNMI_LOG_FATAL;
   if (level > GNMI_LOG_DEBUG)
-    level = GNMI_LOG_DEBUG;
-  current_level = level;
+    return GNMI_LOG_DEBUG;
+  return level;
+}
+
+void gnmi_log_init(int level)
+{
+  current_level = clamp_level(level);
+
+  /* Per-subsystem overrides via env vars (default: inherit global level).
+   * GNMI_LOG_LEVEL_SR / GNMI_LOG_LEVEL_LY: 0=fatal .. 4=debug */
+  const char *sr_env = getenv("GNMI_LOG_LEVEL_SR");
+  const char *ly_env = getenv("GNMI_LOG_LEVEL_LY");
+  sr_level = sr_env ? clamp_level(atoi(sr_env)) : current_level;
+  ly_level = ly_env ? clamp_level(atoi(ly_env)) : current_level;
 
   /* Route sysrepo logs through our callback for consistent formatting.
    * Disable direct stderr output; the callback filters by level. */
@@ -66,7 +80,11 @@ void gnmi_log_init(int level)
 #else
   ly_set_log_clb(gnmi_ly_log_cb);
 #endif
-  ly_log_level(level >= GNMI_LOG_WARNING ? LY_LLWRN : LY_LLERR);
+  /* Set libyang's internal level to the max we might want to see */
+  LY_LOG_LEVEL ly_max = ly_level >= GNMI_LOG_DEBUG ? LY_LLDBG :
+                         ly_level >= GNMI_LOG_INFO ? LY_LLVRB :
+                         ly_level >= GNMI_LOG_WARNING ? LY_LLWRN : LY_LLERR;
+  ly_log_level(ly_max);
 }
 
 void gnmi_log_enable_syslog(const char *ident)
@@ -109,18 +127,17 @@ void gnmi_log(enum gnmi_log_level lvl, const char *fmt, ...)
 
 static void gnmi_sr_log_cb(sr_log_level_t level, const char *msg)
 {
-  /* Cap sysrepo at INFO to suppress verbose internal debug (SHM dumps, etc.) */
-  if (level > SR_LL_INF)
-    return;
-
   enum gnmi_log_level lvl;
 
   switch (level) {
   case SR_LL_ERR: lvl = GNMI_LOG_ERROR; break;
   case SR_LL_WRN: lvl = GNMI_LOG_WARNING; break;
   case SR_LL_INF: lvl = GNMI_LOG_INFO; break;
+  case SR_LL_DBG: lvl = GNMI_LOG_DEBUG; break;
   default:        return;
   }
+  if (lvl > sr_level)
+    return;
   gnmi_log(lvl, "sysrepo: %s", msg);
 }
 
@@ -139,8 +156,12 @@ static void gnmi_ly_log_cb(LY_LOG_LEVEL level, const char *msg,
   switch (level) {
   case LY_LLERR: lvl = GNMI_LOG_ERROR; break;
   case LY_LLWRN: lvl = GNMI_LOG_WARNING; break;
+  case LY_LLVRB: lvl = GNMI_LOG_INFO; break;
+  case LY_LLDBG: lvl = GNMI_LOG_DEBUG; break;
   default:       return;
   }
+  if (lvl > ly_level)
+    return;
   gnmi_log(lvl, "libyang: %s", msg);
 }
 
