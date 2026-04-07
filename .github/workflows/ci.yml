@@ -91,7 +91,9 @@ jobs:
             -Iproto --python_out=tests/proto --grpc_python_out=tests/proto \
             proto/gnmi.proto proto/gnmi_ext.proto
       - name: Fix permissions for NACM tests
-        run: chmod -R 777 builddir/deps builddir/test_repo 2>/dev/null || true
+        run: |
+          # /home/runner is 750 on GitHub Actions — nacmtestuser needs +x to traverse it
+          chmod o+x /home/runner
       - name: Run tests
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/builddir/deps/lib
