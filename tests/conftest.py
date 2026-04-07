@@ -157,6 +157,9 @@ _COMPLIANCE_MAP = [
     # --- Stress / performance
     ("test_stress", "Stress Tests"),
 
+    # --- Graceful shutdown ---
+    ("test_graceful_shutdown", "Graceful Shutdown"),
+
     # --- gnmic interop (catch-all for remaining gnmic tests) ---
     ("test_gnmic", "Interop gnmic"),
 ]
@@ -218,6 +221,7 @@ _SECTION_ORDER = [
     # Other
     "gNMI RPC/Action",
     "Stress Tests",
+    "Graceful Shutdown",
     "Interop gnmic",
 ]
 

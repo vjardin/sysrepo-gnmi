@@ -27,6 +27,8 @@ struct gnmi_config {
   int         max_streams_per_session; /* 0 = unlimited */
 };
 
+struct stream_ctx;  /* forward */
+
 gnmi_server_t *gnmi_server_create(const struct gnmi_config *cfg, sr_conn_ctx_t *sr_conn);
 int  gnmi_server_run(gnmi_server_t *srv);
 void gnmi_server_shutdown(gnmi_server_t *srv);
@@ -40,3 +42,7 @@ bool                    gnmi_server_is_shutting_down(gnmi_server_t *srv);
 struct event_base      *gnmi_server_get_evbase(gnmi_server_t *srv);
 const char             *gnmi_server_get_nacm_user(gnmi_server_t *srv);
 gnmi_session_registry_t *gnmi_server_get_sessions(gnmi_server_t *srv);
+
+/* Active stream tracking for graceful shutdown */
+void gnmi_server_stream_register(gnmi_server_t *srv, struct stream_ctx *sctx);
+void gnmi_server_stream_unregister(gnmi_server_t *srv, struct stream_ctx *sctx);

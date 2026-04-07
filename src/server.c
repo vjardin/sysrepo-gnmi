@@ -5,6 +5,7 @@
 
 #include "server.h"
 #include "gnmi_service.h"
+#include "subscribe.h"
 #include "confirm.h"
 #include "session.h"
 #include "log.h"
@@ -30,6 +31,8 @@ struct gnmi_server {
   int                     idle_polls;  /* consecutive empty CQ polls */
   gnmi_session_registry_t *sessions;
   struct event           *ev_session_reap;  /* periodic idle session reaper */
+  struct stream_ctx      *active_streams;   /* linked list of active subscribe streams */
+  struct event           *ev_drain;         /* drain timer for graceful shutdown */
 };
 
 /* Adaptive CQ polling */
@@ -112,6 +115,39 @@ static void on_signal_cb(evutil_socket_t sig, short what, void *arg)
     gnmi_log(GNMI_LOG_WARNING, "Forced exit on second signal");
     exit(EXIT_FAILURE);
   }
+}
+
+/* - Active stream tracking ---------------------------------------- */
+
+void gnmi_server_stream_register(gnmi_server_t *srv, struct stream_ctx *sctx)
+{
+  sctx->next_stream = srv->active_streams;
+  srv->active_streams = sctx;
+}
+
+void gnmi_server_stream_unregister(gnmi_server_t *srv, struct stream_ctx *sctx)
+{
+  struct stream_ctx **pp = &srv->active_streams;
+  while (*pp) {
+    if (*pp == sctx) {
+      *pp = sctx->next_stream;
+      sctx->next_stream = NULL;
+      return;
+    }
+    pp = &(*pp)->next_stream;
+  }
+}
+
+/* - Drain timer for graceful shutdown ----------------------------- */
+
+#define DRAIN_TIMEOUT_SEC  3
+
+static void on_drain_cb(evutil_socket_t fd, short what, void *arg)
+{
+  (void)fd; (void)what;
+  gnmi_server_t *srv = arg;
+  gnmi_log(GNMI_LOG_INFO, "Drain timeout, breaking event loop");
+  event_base_loopbreak(srv->evbase);
 }
 
 /* - Session idle reaper ------------------------------------------- */
@@ -259,11 +295,29 @@ void gnmi_server_shutdown(gnmi_server_t *srv)
 
   gnmi_log(GNMI_LOG_INFO, "Initiating graceful shutdown");
 
+  /* Close all active subscribe streams with UNAVAILABLE.
+   * Walk a snapshot: stream_close may trigger stream_free which
+   * modifies the list via gnmi_server_stream_unregister. */
+  int n_streams = 0;
+  struct stream_ctx *sctx = srv->active_streams;
+  while (sctx) {
+    struct stream_ctx *next = sctx->next_stream;
+    stream_shutdown(sctx);
+    n_streams++;
+    sctx = next;
+  }
+  if (n_streams > 0)
+    gnmi_log(GNMI_LOG_INFO, "Shutdown: closed %d active stream(s)", n_streams);
+
   /* Tell gRPC to stop accepting new calls */
   grpc_server_shutdown_and_notify(srv->grpc_srv, srv->cq, NULL);
 
-  /* The CQ will eventually produce GRPC_QUEUE_SHUTDOWN,
-   * which triggers event_base_loopbreak in on_cq_poll_cb */
+  /* Start drain timer: keep polling the CQ so pending sends
+   * (the UNAVAILABLE status to streams) can be flushed. After
+   * DRAIN_TIMEOUT_SEC, break the event loop regardless. */
+  srv->ev_drain = evtimer_new(srv->evbase, on_drain_cb, srv);
+  struct timeval tv = { .tv_sec = DRAIN_TIMEOUT_SEC };
+  evtimer_add(srv->ev_drain, &tv);
 }
 
 void gnmi_server_destroy(gnmi_server_t *srv)
@@ -284,20 +338,24 @@ void gnmi_server_destroy(gnmi_server_t *srv)
     event_free(srv->ev_sigint);
   }
 
-  /* Session registry cleanup */
+  /* Drain timer cleanup */
+  if (srv->ev_drain) {
+    event_del(srv->ev_drain);
+    event_free(srv->ev_drain);
+  }
+
+  /* Session registry cleanup (candidate release must be before destroy) */
   if (srv->ev_session_reap) {
     event_del(srv->ev_session_reap);
     event_free(srv->ev_session_reap);
   }
   if (srv->sessions) {
+    gnmi_session_candidate_cleanup_all(srv->sessions);
     uint32_t n = gnmi_session_count(srv->sessions);
     if (n > 0)
       gnmi_log(GNMI_LOG_INFO, "Shutdown: %u active session(s)", n);
     gnmi_session_registry_destroy(srv->sessions);
   }
-
-  /* Release candidate sessions on all sessions */
-  gnmi_session_candidate_cleanup_all(srv->sessions);
 
   /* Destroy confirmed-commit state */
   confirm_state_t *cs = confirm_state_get_global();

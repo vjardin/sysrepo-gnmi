@@ -116,6 +116,9 @@ struct stream_ctx {
   grpc_status_code   close_code;
   char              *close_msg;
   int                close_cancelled;
+
+  /* Linked list for server-wide active stream tracking (graceful shutdown) */
+  struct stream_ctx *next_stream;
 };
 
 /* Create and arm the streaming acceptor for Subscribe */
@@ -123,3 +126,7 @@ void subscribe_arm(gnmi_server_t *srv, int method_idx);
 
 /* Step function for the streaming state machine */
 void stream_step(struct call_ctx *base, bool success);
+
+/* Initiate close on a stream (for graceful shutdown).
+ * Only call from the main event loop. */
+void stream_shutdown(struct stream_ctx *sctx);

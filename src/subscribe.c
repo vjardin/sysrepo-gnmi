@@ -325,6 +325,9 @@ static void step_send_initial_metadata(struct stream_ctx *sctx, bool success)
     gpr_free(peer);
   }
 
+  /* Register in active stream list for graceful shutdown */
+  gnmi_server_stream_register(sctx->base.srv, sctx);
+
   /* Re-arm to accept next Subscribe call */
   subscribe_arm(sctx->base.srv, sctx->method_idx);
 
@@ -1109,6 +1112,9 @@ static void step_close_done(struct stream_ctx *sctx, bool success)
 
 static void stream_free(struct stream_ctx *sctx)
 {
+  /* Unregister from active stream list */
+  gnmi_server_stream_unregister(sctx->base.srv, sctx);
+
   /* Decrement session stream count */
   gnmi_session_stream_del(sctx->session);
 
@@ -1163,6 +1169,16 @@ static void stream_free(struct stream_ctx *sctx)
   if (sctx->base.call)
     grpc_call_unref(sctx->base.call);
   free(sctx);
+}
+
+/* - Graceful shutdown ---------------------------------------------- */
+
+void stream_shutdown(struct stream_ctx *sctx)
+{
+  if (sctx->state == STREAM_CLOSING || sctx->state == STREAM_DONE)
+    return;
+  gnmi_log(GNMI_LOG_DEBUG, "Shutting down subscribe stream (state=%d)", sctx->state);
+  stream_close(sctx, GRPC_STATUS_UNAVAILABLE, "Server shutting down");
 }
 
 /* - Arm: accept next Subscribe call ------------------------------- */
