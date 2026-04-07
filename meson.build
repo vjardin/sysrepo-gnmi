@@ -16,6 +16,7 @@ grpc_dep       = dependency('grpc', version : '>=1.18')
 libevent_dep   = dependency('libevent', version : '>=2.1')
 libevent_pt_dep = dependency('libevent_pthreads', version : '>=2.1')
 threads_dep    = dependency('threads')
+libsystemd_dep = dependency('libsystemd', version : '>=250', required : false)
 
 # -- CESNET dependencies via cmake (custom_target) --------------------
 # Prerequisite: run `meson subprojects download` before `meson setup`
@@ -124,18 +125,26 @@ gnmi_src = files(
   'src/monitoring.c',
 )
 
+gnmi_server_deps = [
+  gnmi_proto_dep,
+  grpc_dep,
+  libevent_dep,
+  libevent_pt_dep,
+  cjson_dep,
+  threads_dep,
+  cesnet_dep,
+]
+gnmi_server_cargs = sanitize_args
+
+if libsystemd_dep.found()
+  gnmi_server_deps += libsystemd_dep
+  gnmi_server_cargs += '-DHAVE_SYSTEMD'
+endif
+
 gnmi_server = executable('gnmi_server',
   gnmi_src,
-  dependencies : [
-    gnmi_proto_dep,
-    grpc_dep,
-    libevent_dep,
-    libevent_pt_dep,
-    cjson_dep,
-    threads_dep,
-    cesnet_dep,
-  ],
-  c_args : sanitize_args,
+  dependencies : gnmi_server_deps,
+  c_args : gnmi_server_cargs,
   link_args : sanitize_link_args,
   install : true,
   install_dir : get_option('sbindir'),

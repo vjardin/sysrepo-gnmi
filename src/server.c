@@ -19,6 +19,10 @@
 #include <event2/event.h>
 #include <event2/thread.h>
 
+#ifdef HAVE_SYSTEMD
+#include <systemd/sd-daemon.h>
+#endif
+
 struct gnmi_server {
   struct event_base      *evbase;
   struct event           *ev_sigterm;
@@ -280,6 +284,10 @@ gnmi_server_t *gnmi_server_create(const struct gnmi_config *cfg, sr_conn_ctx_t *
   /* Operational state monitoring (non-fatal if it fails) */
   monitoring_init(srv, sr_conn, cfg->yang_dir);
 
+#ifdef HAVE_SYSTEMD
+  sd_notify(0, "READY=1");
+#endif
+
   return srv;
 
 err:
@@ -298,6 +306,10 @@ void gnmi_server_shutdown(gnmi_server_t *srv)
   if (srv->shutting_down)
     return;
   srv->shutting_down = true;
+
+#ifdef HAVE_SYSTEMD
+  sd_notify(0, "STOPPING=1");
+#endif
 
   gnmi_log(GNMI_LOG_INFO, "Initiating graceful shutdown");
 
