@@ -159,3 +159,105 @@ def test_confirm_timeout_rollback(gnmi_stub):
     get_resp = gnmi_stub.Get(get_req, timeout=5)
     assert len(get_resp.notification[0].update) == 0, \
         "Data should have been rolled back after confirm timeout"
+
+
+def test_commit_confirmed_extension(gnmi_stub):
+    """Commit-confirmed via gnmi_ext.Commit extension (gnmic --commit-request).
+
+    Equivalent to: "Commit confirmed extension" [confirm-ext]
+    """
+    import gnmi_ext_pb2
+    from google.protobuf import duration_pb2
+
+    # Set with commit-request extension (60s rollback)
+    commit_ext = gnmi_ext_pb2.Extension(
+        commit=gnmi_ext_pb2.Commit(
+            id="test-ext-1",
+            commit=gnmi_ext_pb2.CommitRequest(
+                rollback_duration=duration_pb2.Duration(seconds=60),
+            ),
+        ),
+    )
+    path = xpath_to_path(
+        "/gnmi-server-test:test/things[name='CommitExt']/description"
+    )
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        extension=[commit_ext],
+        update=[gnmi_pb2.Update(
+            path=path,
+            val=gnmi_pb2.TypedValue(json_ietf_val=b'"ext-committed"'),
+        )],
+    ), timeout=5)
+
+    # Verify data is present
+    resp = gnmi_stub.Get(gnmi_pb2.GetRequest(
+        path=[xpath_to_path("/gnmi-server-test:test/things[name='CommitExt']/description")],
+        type=gnmi_pb2.GetRequest.CONFIG,
+        encoding=gnmi_pb2.JSON_IETF,
+    ), timeout=5)
+    assert len(resp.notification[0].update) == 1
+
+    # Confirm via extension
+    confirm_ext = gnmi_ext_pb2.Extension(
+        commit=gnmi_ext_pb2.Commit(
+            id="test-ext-1",
+            confirm=gnmi_ext_pb2.CommitConfirm(),
+        ),
+    )
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        extension=[confirm_ext],
+    ), timeout=5)
+
+    # Cleanup
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        delete=[xpath_to_path("/gnmi-server-test:test/things[name='CommitExt']")],
+    ), timeout=5)
+
+
+def test_commit_confirmed_cancel_extension(gnmi_stub):
+    """Commit-confirmed cancel via gnmi_ext.Commit extension (gnmic --commit-cancel).
+
+    Equivalent to: "Commit confirmed cancel extension" [confirm-ext]
+    """
+    import gnmi_ext_pb2
+    from google.protobuf import duration_pb2
+
+    # Set with commit-request
+    commit_ext = gnmi_ext_pb2.Extension(
+        commit=gnmi_ext_pb2.Commit(
+            id="test-ext-2",
+            commit=gnmi_ext_pb2.CommitRequest(
+                rollback_duration=duration_pb2.Duration(seconds=60),
+            ),
+        ),
+    )
+    path = xpath_to_path(
+        "/gnmi-server-test:test/things[name='CommitCancel']/description"
+    )
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        extension=[commit_ext],
+        update=[gnmi_pb2.Update(
+            path=path,
+            val=gnmi_pb2.TypedValue(json_ietf_val=b'"will-cancel"'),
+        )],
+    ), timeout=5)
+
+    # Cancel via extension
+    cancel_ext = gnmi_ext_pb2.Extension(
+        commit=gnmi_ext_pb2.Commit(
+            id="test-ext-2",
+            cancel=gnmi_ext_pb2.CommitCancel(),
+        ),
+    )
+    gnmi_stub.Set(gnmi_pb2.SetRequest(
+        extension=[cancel_ext],
+    ), timeout=5)
+
+    # Verify data is gone (rolled back)
+    resp = gnmi_stub.Get(gnmi_pb2.GetRequest(
+        path=[xpath_to_path("/gnmi-server-test:test/things[name='CommitCancel']")],
+        type=gnmi_pb2.GetRequest.CONFIG,
+        encoding=gnmi_pb2.JSON_IETF,
+    ), timeout=5)
+    assert len(resp.notification[0].update) == 0, \
+        "After cancel, data should be rolled back"

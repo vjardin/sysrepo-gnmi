@@ -19,6 +19,8 @@
 #include <libyang/libyang.h>
 
 #include "gnmi.pb-c.h"
+#include "gnmi_ext.pb-c.h"
+#include "google/protobuf/duration.pb-c.h"
 
 /* - Candidate datastore session (persistent, locked) -------------- */
 /*
@@ -439,9 +441,68 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn, const char *user, grpc_byte_
     }
   }
 
-  /* Check confirmed-commit state */
+  /* Check for gnmi_ext.Commit extension (gnmic --commit-request/confirm/cancel).
+   * This is the OpenConfig standard; the custom req->confirm is the legacy. */
   confirm_state_t *cs = confirm_state_get_global();
-  bool has_confirm = (req->confirm != NULL);
+  GnmiExt__Commit *ext_commit = NULL;
+  for (size_t i = 0; i < req->n_extension; i++) {
+    if (req->extension[i]->ext_case == GNMI_EXT__EXTENSION__EXT_COMMIT) {
+      ext_commit = req->extension[i]->commit;
+      break;
+    }
+  }
+
+  /* Handle confirm/cancel actions (no edits needed, just state change) */
+  if (ext_commit && ext_commit->action_case == GNMI_EXT__COMMIT__ACTION_CONFIRM) {
+    if (!cs || !confirm_state_waiting(cs)) {
+      *status_msg = strdup("No commit pending to confirm");
+      ret = GRPC_STATUS_FAILED_PRECONDITION;
+      goto cleanup;
+    }
+    if (confirm_state_confirm(cs, sr_conn, status_msg) < 0) {
+      ret = GRPC_STATUS_INTERNAL;
+      goto cleanup;
+    }
+    gnmi_log(GNMI_LOG_INFO, "Commit-confirmed: confirmed (id=%s)", ext_commit->id);
+    resp.timestamp = get_time_nanosec();
+    *response_bb = gnmi_pack((ProtobufCMessage *)&resp);
+    ret = GRPC_STATUS_OK;
+    goto cleanup;
+  }
+
+  if (ext_commit && ext_commit->action_case == GNMI_EXT__COMMIT__ACTION_CANCEL) {
+    if (cs && confirm_state_waiting(cs)) {
+      confirm_state_restore(cs);
+      gnmi_log(GNMI_LOG_INFO, "Commit-confirmed: cancelled (id=%s)", ext_commit->id);
+    }
+    resp.timestamp = get_time_nanosec();
+    *response_bb = gnmi_pack((ProtobufCMessage *)&resp);
+    ret = GRPC_STATUS_OK;
+    goto cleanup;
+  }
+
+  if (ext_commit && ext_commit->action_case == GNMI_EXT__COMMIT__ACTION_SET_ROLLBACK_DURATION) {
+    /* Update the rollback timer on an existing commit */
+    if (!cs || !confirm_state_waiting(cs)) {
+      *status_msg = strdup("No commit pending to update");
+      ret = GRPC_STATUS_FAILED_PRECONDITION;
+      goto cleanup;
+    }
+    Google__Protobuf__Duration *dur = ext_commit->set_rollback_duration->rollback_duration;
+    uint32_t new_timeout = dur ? (uint32_t)dur->seconds : cs->timeout_secs;
+    struct timeval tv = { .tv_sec = new_timeout };
+    evtimer_add(cs->ev_timeout, &tv);
+    cs->timeout_secs = new_timeout;
+    gnmi_log(GNMI_LOG_INFO, "Commit-confirmed: rollback duration updated to %us", new_timeout);
+    resp.timestamp = get_time_nanosec();
+    *response_bb = gnmi_pack((ProtobufCMessage *)&resp);
+    ret = GRPC_STATUS_OK;
+    goto cleanup;
+  }
+
+  /* Determine if this Set includes a commit-request (extension or legacy) */
+  bool has_confirm = (req->confirm != NULL) ||
+    (ext_commit && ext_commit->action_case == GNMI_EXT__COMMIT__ACTION_COMMIT);
 
   if (cs && confirm_state_waiting(cs) && !has_confirm) {
     *status_msg = strdup(
@@ -481,18 +542,34 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn, const char *user, grpc_byte_
 
   /* Snapshot config BEFORE applying edits (for confirmed-commit rollback) */
   if (has_confirm && cs) {
+    /* Extract timeout from extension or legacy confirm */
+    uint32_t req_timeout = 0;
+    if (ext_commit && ext_commit->action_case == GNMI_EXT__COMMIT__ACTION_COMMIT &&
+        ext_commit->commit && ext_commit->commit->rollback_duration) {
+      req_timeout = (uint32_t)ext_commit->commit->rollback_duration->seconds;
+    } else if (req->confirm) {
+      req_timeout = req->confirm->timeout_secs;
+    }
+
     uint32_t min_wait = 0, timeout = 0;
-    if (confirm_state_snapshot(cs, req->confirm->timeout_secs, &min_wait, &timeout) < 0) {
+    if (confirm_state_snapshot(cs, req_timeout, &min_wait, &timeout) < 0) {
       *status_msg = strdup("Failed to snapshot config");
       ret = GRPC_STATUS_INTERNAL;
       goto cleanup;
     }
     cs->set_txn_id = req->transaction_id;
 
-    resp.confirm = calloc(1, sizeof(*resp.confirm));
-    gnmi__confirm_parms_response__init(resp.confirm);
-    resp.confirm->min_wait_secs = min_wait;
-    resp.confirm->timeout_secs = timeout;
+    if (ext_commit)
+      gnmi_log(GNMI_LOG_INFO, "Commit-confirmed: started (id=%s, timeout=%us)",
+               ext_commit->id, timeout);
+
+    /* Legacy confirm response */
+    if (req->confirm) {
+      resp.confirm = calloc(1, sizeof(*resp.confirm));
+      gnmi__confirm_parms_response__init(resp.confirm);
+      resp.confirm->min_wait_secs = min_wait;
+      resp.confirm->timeout_secs = timeout;
+    }
   }
 
   /* Apply the edit batch */
