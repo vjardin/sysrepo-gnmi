@@ -6,6 +6,7 @@
 #define _GNU_SOURCE
 
 #include "session.h"
+#include "monitoring.h"
 #include "log.h"
 
 #include <stdlib.h>
@@ -106,6 +107,8 @@ struct gnmi_session *gnmi_session_get(gnmi_session_registry_t *reg,
            s->username ? " user=" : "",
            s->username ? s->username : "");
 
+  monitoring_notify_session_start(s->id, s->peer_addr, s->username);
+
   return s;
 }
 
@@ -192,6 +195,7 @@ int gnmi_session_reap_idle(gnmi_session_registry_t *reg, unsigned int idle_secs)
                "Session %lu: reaped (idle %us, peer %s, rpcs=%lu, errors=%lu)",
                (unsigned long)s->id, idle, s->peer_addr,
                (unsigned long)s->rpc_count, (unsigned long)s->rpc_errors);
+      monitoring_notify_session_end(s->id, s->peer_addr, "idle-timeout");
       *pp = s->next;
       reg->count--;
       gnmi_session_candidate_release(s);

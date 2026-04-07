@@ -157,8 +157,11 @@ _COMPLIANCE_MAP = [
     # --- Stress / performance
     ("test_stress", "Stress Tests"),
 
-    # --- Monitoring ---
+    # --- Monitoring & Notifications ---
     ("test_monitoring", "Operational Monitoring"),
+    ("test_session_lifecycle_notifications", "YANG Notifications - session"),
+    ("test_confirmed_commit_notifications", "YANG Notifications - commit"),
+    ("test_confirmed_commit_cancel", "YANG Notifications - commit"),
 
     # --- Graceful shutdown ---
     ("test_graceful_shutdown", "Graceful Shutdown"),
@@ -225,6 +228,8 @@ _SECTION_ORDER = [
     "gNMI RPC/Action",
     "Stress Tests",
     "Operational Monitoring",
+    "YANG Notifications - session",
+    "YANG Notifications - commit",
     "Graceful Shutdown",
     "Interop gnmic",
 ]

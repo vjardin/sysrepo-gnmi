@@ -10,6 +10,7 @@
 #include "xpath.h"
 #include "encode.h"
 #include "session.h"
+#include "monitoring.h"
 #include "log.h"
 
 #include <stdbool.h>
@@ -463,6 +464,7 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn,
     if (cs && confirm_state_waiting(cs)) {
       confirm_state_restore(cs);
       gnmi_log(GNMI_LOG_INFO, "Commit-confirmed: cancelled (id=%s)", ext_commit->id);
+      monitoring_notify_confirmed_commit(ext_commit->id, "cancel");
     }
     resp.timestamp = get_time_nanosec();
     *response_bb = gnmi_pack((ProtobufCMessage *)&resp);
@@ -548,9 +550,11 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn,
     }
     cs->set_txn_id = req->transaction_id;
 
-    if (ext_commit)
+    if (ext_commit) {
       gnmi_log(GNMI_LOG_INFO, "Commit-confirmed: started (id=%s, timeout=%us)",
                ext_commit->id, timeout);
+      monitoring_notify_confirmed_commit(ext_commit->id, "start");
+    }
 
     /* Legacy confirm response */
     if (req->confirm) {

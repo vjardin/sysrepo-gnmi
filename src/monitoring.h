@@ -15,3 +15,11 @@ int monitoring_init(gnmi_server_t *srv, sr_conn_ctx_t *conn, const char *yang_di
 
 /* Cleanup: unsubscribe and release resources. */
 void monitoring_cleanup(void);
+
+/* Session lifecycle notifications */
+void monitoring_notify_session_start(uint64_t id, const char *peer, const char *username);
+void monitoring_notify_session_end(uint64_t id, const char *peer, const char *reason);
+
+/* Confirmed-commit lifecycle notifications.
+ * event: "start", "confirm", "cancel", "timeout-rollback" */
+void monitoring_notify_confirmed_commit(const char *commit_id, const char *event);

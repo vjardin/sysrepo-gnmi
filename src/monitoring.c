@@ -148,3 +148,87 @@ void monitoring_cleanup(void)
   mon_sess = NULL;
   mon_srv = NULL;
 }
+
+/* YANG notifications */
+
+#define NOTIF_SESSION_START "/sysrepo-gnmi-monitoring:gnmi-session-start"
+#define NOTIF_SESSION_END   "/sysrepo-gnmi-monitoring:gnmi-session-end"
+#define NOTIF_COMMIT        "/sysrepo-gnmi-monitoring:gnmi-confirmed-commit"
+
+void
+monitoring_notify_session_start(uint64_t id, const char *peer, const char *username)
+{
+  if (!mon_sess)
+    return;
+
+  const struct ly_ctx *ctx = sr_session_acquire_context(mon_sess);
+  struct lyd_node *notif = NULL;
+  char buf[64];
+
+  snprintf(buf, sizeof(buf), "%lu", (unsigned long)id);
+  lyd_new_path(NULL, ctx, NOTIF_SESSION_START "/session-id", buf, 0, &notif);
+  if (notif && peer)
+    lyd_new_path(notif, ctx, NOTIF_SESSION_START "/peer-address", peer, 0, NULL);
+  if (notif && username)
+    lyd_new_path(notif, ctx, NOTIF_SESSION_START "/username", username, 0, NULL);
+
+  sr_session_release_context(mon_sess);
+
+  if (notif) {
+    int rc = sr_notif_send_tree(mon_sess, notif, 0, 0);
+    if (rc != SR_ERR_OK)
+      gnmi_log(GNMI_LOG_DEBUG, "session-start notif failed: %s", sr_strerror(rc));
+    lyd_free_all(notif);
+  }
+}
+
+void
+monitoring_notify_session_end(uint64_t id, const char *peer, const char *reason)
+{
+  if (!mon_sess)
+    return;
+
+  const struct ly_ctx *ctx = sr_session_acquire_context(mon_sess);
+  struct lyd_node *notif = NULL;
+  char buf[64];
+
+  snprintf(buf, sizeof(buf), "%lu", (unsigned long)id);
+  lyd_new_path(NULL, ctx, NOTIF_SESSION_END "/session-id", buf, 0, &notif);
+  if (notif && peer)
+    lyd_new_path(notif, ctx, NOTIF_SESSION_END "/peer-address", peer, 0, NULL);
+  if (notif && reason)
+    lyd_new_path(notif, ctx, NOTIF_SESSION_END "/reason", reason, 0, NULL);
+
+  sr_session_release_context(mon_sess);
+
+  if (notif) {
+    int rc = sr_notif_send_tree(mon_sess, notif, 0, 0);
+    if (rc != SR_ERR_OK)
+      gnmi_log(GNMI_LOG_DEBUG, "session-end notif failed: %s", sr_strerror(rc));
+    lyd_free_all(notif);
+  }
+}
+
+void
+monitoring_notify_confirmed_commit(const char *commit_id, const char *event)
+{
+  if (!mon_sess)
+    return;
+
+  const struct ly_ctx *ctx = sr_session_acquire_context(mon_sess);
+  struct lyd_node *notif = NULL;
+
+  lyd_new_path(NULL, ctx, NOTIF_COMMIT "/commit-id",
+               commit_id ? commit_id : "unknown", 0, &notif);
+  if (notif && event)
+    lyd_new_path(notif, ctx, NOTIF_COMMIT "/event", event, 0, NULL);
+
+  sr_session_release_context(mon_sess);
+
+  if (notif) {
+    int rc = sr_notif_send_tree(mon_sess, notif, 0, 0);
+    if (rc != SR_ERR_OK)
+      gnmi_log(GNMI_LOG_DEBUG, "confirmed-commit notif failed: %s", sr_strerror(rc));
+    lyd_free_all(notif);
+  }
+}

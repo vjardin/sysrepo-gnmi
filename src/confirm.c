@@ -7,6 +7,7 @@
 
 #include "confirm.h"
 #include "xpath.h"
+#include "monitoring.h"
 #include "log.h"
 
 #include <stdlib.h>
@@ -44,6 +45,7 @@ static void confirm_timeout_cb(evutil_socket_t fd, short what, void *arg)
   confirm_state_t *cs = arg;
 
   gnmi_log(GNMI_LOG_WARNING, "Confirmed-commit timeout - restoring config");
+  monitoring_notify_confirmed_commit(NULL, "timeout-rollback");
   confirm_state_restore(cs);
 }
 
@@ -149,6 +151,7 @@ int confirm_state_confirm(confirm_state_t *cs, sr_conn_ctx_t *sr_conn, char **er
   confirm_state_clear(cs);
 
   gnmi_log(GNMI_LOG_INFO, "Confirmed-commit: confirmed and persisted");
+  monitoring_notify_confirmed_commit(NULL, "confirm");
   return 0;
 }
 

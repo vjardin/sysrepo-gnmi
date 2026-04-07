@@ -88,4 +88,69 @@ module sysrepo-gnmi-monitoring {
       }
     }
   }
+
+  notification gnmi-session-start {
+    description
+      "A new gNMI client session has been established.";
+    leaf session-id {
+      type uint64;
+    }
+    leaf peer-address {
+      type string;
+    }
+    leaf username {
+      type string;
+    }
+  }
+
+  notification gnmi-session-end {
+    description
+      "A gNMI client session has ended.";
+    leaf session-id {
+      type uint64;
+    }
+    leaf peer-address {
+      type string;
+    }
+    leaf reason {
+      type enumeration {
+        enum closed {
+          description "Client disconnected normally.";
+        }
+        enum idle-timeout {
+          description "Session reaped after idle timeout.";
+        }
+        enum killed {
+          description "Session terminated by the server.";
+        }
+        enum resource-exhausted {
+          description "Session rejected due to resource limits.";
+        }
+      }
+    }
+  }
+
+  notification gnmi-confirmed-commit {
+    description
+      "A confirmed-commit lifecycle event.";
+    leaf commit-id {
+      type string;
+    }
+    leaf event {
+      type enumeration {
+        enum start {
+          description "Confirmed commit initiated, rollback timer armed.";
+        }
+        enum confirm {
+          description "Commit confirmed and persisted.";
+        }
+        enum cancel {
+          description "Commit cancelled by client.";
+        }
+        enum timeout-rollback {
+          description "Rollback timer expired, config restored.";
+        }
+      }
+    }
+  }
 }
