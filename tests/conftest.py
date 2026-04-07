@@ -3,6 +3,9 @@ pytest fixtures for sysrepo-gnmi conformance tests.
 
 Starts gnmi_server as a subprocess, creates gRPC channel + stub,
 and provides helpers for sysrepo state manipulation.
+
+Compliance reporting: tests are auto-classified into gNMI/RFC spec
+sections for JUnit XML grouping and compliance matrix output.
 """
 
 import os
@@ -11,9 +14,321 @@ import time
 import signal
 import socket
 import subprocess
+from collections import OrderedDict
 
 import grpc
 import pytest
+
+
+# gNMI / RFC spec-section compliance classification
+# Order matters: first match wins, so more specific prefixes come first.
+# Section numbers reference the gNMI specification (OpenConfig) and RFCs.
+
+_COMPLIANCE_MAP = [
+    # --- gNMI §2.2.2 Paths (structured path encoding)
+    ("test_get_name_with_", "gNMI §2.2.2 Paths - special chars"),
+    ("test_get_composite_key", "gNMI §2.2.2 Paths - composite keys"),
+    ("test_get_leaf_parent_with_", "gNMI §2.2.2 Paths - special chars"),
+    ("test_get_relative_path", "gNMI §2.2.2 Paths - validation"),
+    ("test_subscribe_on_change_composite_key", "gNMI §2.2.2 Paths - composite keys"),
+
+    # --- gNMI §2.2.2.1 Path Target
+    ("test_get_with_target", "gNMI §2.2.2.1 Path Target"),
+    ("test_subscribe_once_with_target", "gNMI §2.2.2.1 Path Target"),
+
+    # --- gNMI §2.2.3 TypedValue (node values)
+    ("test_set_empty_leaf", "gNMI §2.2.3 TypedValue"),
+    ("test_set_boolean_leaf", "gNMI §2.2.3 TypedValue"),
+    ("test_set_integer_leaf", "gNMI §2.2.3 TypedValue"),
+    ("test_set_decimal_leaf", "gNMI §2.2.3 TypedValue"),
+    ("test_set_decimal64_val_type", "gNMI §2.2.3 TypedValue"),
+    ("test_set_any_val_type", "gNMI §2.2.3 TypedValue"),
+    ("test_set_leaflist_val_type", "gNMI §2.2.3 TypedValue"),
+
+    # --- gNMI §2.3 Encoding
+    ("test_get_ascii", "gNMI §2.3.4 Encoding ASCII"),
+    ("test_get_proto", "gNMI §2.3.3 Encoding PROTO"),
+    ("test_get_unsupported_encoding", "gNMI §2.3 Encoding - error"),
+    ("test_set_json_val_type", "gNMI §2.3.1 Encoding JSON"),
+    ("test_set_proto_bytes_val_type", "gNMI §2.3.3 Encoding PROTO"),
+    ("test_subscribe_once_proto", "gNMI §2.3.3 Encoding PROTO"),
+    ("test_subscribe_unsupported_encoding", "gNMI §2.3 Encoding - error"),
+
+    # --- gNMI §2.4.1 Path Prefixes
+    ("test_get_with_prefix", "gNMI §2.4.1 Path Prefixes"),
+    ("test_set_with_prefix", "gNMI §2.4.1 Path Prefixes"),
+    ("test_set_with_empty_prefix", "gNMI §2.4.1 Path Prefixes"),
+    ("test_set_incorrect_prefix", "gNMI §2.4.1 Path Prefixes"),
+    ("test_subscribe_once_with_prefix", "gNMI §2.4.1 Path Prefixes"),
+
+    # --- gNMI §2.6 use_models
+    ("test_get_use_models", "gNMI §2.6 use_models"),
+
+    # --- gNMI §2.7 Origin
+    ("test_get_empty_origin", "gNMI §2.7 Origin"),
+    ("test_get_no_origin", "gNMI §2.7 Origin"),
+    ("test_get_wrong_origin", "gNMI §2.7 Origin"),
+
+    # --- gNMI §3.1 Per-RPC auth (metadata username)
+    ("test_get_with_grpc_metadata", "gNMI §3.1 Per-RPC Auth"),
+
+    # --- gNMI §3.2 Capabilities
+    ("test_capability", "gNMI §3.2 Capabilities"),
+    ("test_gnmic_capabilities", "gNMI §3.2 Capabilities"),
+
+    # --- gNMI §3.3 Get
+    ("test_get_state_datatype", "gNMI §3.3.1 Get - DataType STATE"),
+    ("test_get_config_datastore", "gNMI §3.3.1 Get - DataType CONFIG"),
+    ("test_get_multiple_paths", "gNMI §3.3.1 Get - multiple paths"),
+    ("test_get_wildcard", "gNMI §3.3.1 Get - wildcards"),
+    ("test_get_list_container", "gNMI §3.3.1 Get - wildcards"),
+    ("test_get_nonexistent_path", "gNMI §3.3.4 Get - error handling"),
+    ("test_get_invalid_datatype", "gNMI §3.3.4 Get - error handling"),
+    ("test_get_empty_container", "gNMI §3.3.4 Get - error handling"),
+    ("test_gnmic_get_depth", "gNMI ext.Depth"),
+    ("test_gnmic_get_no_depth", "gNMI ext.Depth"),
+    ("test_gnmic_get", "gNMI §3.3 Get"),
+    ("test_get", "gNMI §3.3 Get"),
+
+    # --- gNMI §3.4 Set
+    ("test_set_candidate", "RFC 8342 §4.2 Candidate DS"),
+    ("test_set_while_waiting_confirm", "gNMI ext.Commit"),
+    ("test_set_replace_removes_absent", "gNMI §3.4.4 Set - replace semantics"),
+    ("test_set_replace_empty", "gNMI §3.4.4 Set - replace"),
+    ("test_set_top_level_replace", "gNMI §3.4.4 Set - replace"),
+    ("test_set_leaflist_replace", "gNMI §3.4.4 Set - replace"),
+    ("test_set_leaflist_inner_replace", "gNMI §3.4.4 Set - replace"),
+    ("test_set_multi_replace", "gNMI §3.4.4 Set - replace"),
+    ("test_set_delete", "gNMI §3.4.6 Set - delete"),
+    ("test_set_top_level_delete", "gNMI §3.4.6 Set - delete"),
+    ("test_set_composite_key", "gNMI §3.4.5 Set - composite keys"),
+    ("test_set_wine_composite_key", "gNMI §3.4.5 Set - composite keys"),
+    ("test_set_transaction", "gNMI §3.4.3 Set - transactions"),
+    ("test_set_scaled", "gNMI §3.4.3 Set - transactions"),
+    ("test_set_failing", "gNMI §3.4.7 Set - error handling"),
+    ("test_set_application_error", "gNMI §3.4.7 Set - error handling"),
+    ("test_set_data_model_error", "gNMI §3.4.7 Set - error handling"),
+    ("test_set_no_val_type", "gNMI §3.4.7 Set - error handling"),
+    ("test_set_no_path", "gNMI §3.4.7 Set - error handling"),
+    ("test_set_no_namespace", "gNMI §3.4.7 Set - error handling"),
+    ("test_set_unsupported_val_types", "gNMI §3.4.7 Set - error handling"),
+    ("test_set_more_unsupported_val_types", "gNMI §3.4.7 Set - error handling"),
+    ("test_set_wildcard_in_update", "gNMI §3.4.6 Set - delete"),
+    ("test_gnmic_set", "gNMI §3.4 Set"),
+    ("test_set", "gNMI §3.4.4 Set - update"),
+
+    # --- gNMI §3.5 Subscribe
+    ("test_subscribe_sample_suppress", "gNMI §3.5.1.5.2 suppress_redundant"),
+    ("test_subscribe_on_change_heartbeat", "gNMI §3.5.1.5.2 heartbeat"),
+    ("test_subscribe_allow_aggregation", "gNMI §3.5.1.2 allow_aggregation"),
+    ("test_subscribe_once_updates_only", "gNMI §3.5.1.2 updates_only"),
+    ("test_subscribe_stream_updates_only", "gNMI §3.5.1.2 updates_only"),
+    ("test_subscribe_poll_updates_only", "gNMI §3.5.1.2 updates_only"),
+    ("test_subscribe_too_many", "gNMI §3.5.1.2 SubscriptionList limits"),
+    ("test_subscribe_at_max", "gNMI §3.5.1.2 SubscriptionList limits"),
+    ("test_subscribe_empty", "gNMI §3.5.1.1 SubscribeRequest"),
+    ("test_subscribe_once_invalid_mode", "gNMI §3.5.1.1 SubscribeRequest"),
+    ("test_subscribe_poll_dup_sub", "gNMI §3.5.1.1 SubscribeRequest"),
+    ("test_subscribe_poll_alias", "gNMI §3.5 Subscribe - aliases"),
+    ("test_subscribe_poll_use_aliases", "gNMI §3.5 Subscribe - aliases"),
+    ("test_subscribe_stream_use_aliases", "gNMI §3.5 Subscribe - aliases"),
+    ("test_subscribe_once", "gNMI §3.5.1.5.1 Subscribe ONCE"),
+    ("test_subscribe_poll", "gNMI §3.5.1.5.3 Subscribe POLL"),
+    ("test_subscribe_stream", "gNMI §3.5.1.5.2 Subscribe STREAM"),
+    ("test_subscribe_on_change", "gNMI §3.5.1.5.2 STREAM ON_CHANGE"),
+    ("test_subscribe_sample", "gNMI §3.5.1.5.2 STREAM SAMPLE"),
+    ("test_subscribe_for_leaf", "gNMI §3.5.1.5.2 STREAM ON_CHANGE"),
+    ("test_gnmic_subscribe", "gNMI §3.5 Subscribe"),
+    ("test_subscribe", "gNMI §3.5 Subscribe"),
+
+    # --- gNMI ext.Commit (confirmed commit with rollback)
+    ("test_confirm", "gNMI ext.Commit"),
+    ("test_commit_confirmed", "gNMI ext.Commit"),
+
+    # --- RFC 8341 NACM (per-operation access control)
+    ("test_nacm_read", "RFC 8341 §3.4.1 NACM read"),
+    ("test_nacm_write", "RFC 8341 §3.4.2 NACM write"),
+    ("test_nacm_exec", "RFC 8341 §3.4.5 NACM exec"),
+    ("test_nacm_capabilities", "RFC 8341 §3.7 NACM defaults"),
+
+    # --- gNMI RPC/Action invocation
+    ("test_rpc", "gNMI RPC/Action"),
+
+    # --- Stress / performance
+    ("test_stress", "Stress Tests"),
+
+    # --- gnmic interop (catch-all for remaining gnmic tests) ---
+    ("test_gnmic", "Interop gnmic"),
+]
+
+# Preferred display order for the compliance matrix (spec section order)
+_SECTION_ORDER = [
+    # Section 2: Common types & encodings
+    "gNMI §2.2.2 Paths - special chars",
+    "gNMI §2.2.2 Paths - composite keys",
+    "gNMI §2.2.2 Paths - validation",
+    "gNMI §2.2.2.1 Path Target",
+    "gNMI §2.2.3 TypedValue",
+    "gNMI §2.3.1 Encoding JSON",
+    "gNMI §2.3.3 Encoding PROTO",
+    "gNMI §2.3.4 Encoding ASCII",
+    "gNMI §2.3 Encoding - error",
+    "gNMI §2.4.1 Path Prefixes",
+    "gNMI §2.6 use_models",
+    "gNMI §2.7 Origin",
+    # Section 3: RPCs
+    "gNMI §3.1 Per-RPC Auth",
+    "gNMI §3.2 Capabilities",
+    "gNMI §3.3 Get",
+    "gNMI §3.3.1 Get - DataType CONFIG",
+    "gNMI §3.3.1 Get - DataType STATE",
+    "gNMI §3.3.1 Get - multiple paths",
+    "gNMI §3.3.1 Get - wildcards",
+    "gNMI §3.3.4 Get - error handling",
+    "gNMI §3.4.3 Set - transactions",
+    "gNMI §3.4.4 Set - update",
+    "gNMI §3.4.4 Set - replace",
+    "gNMI §3.4.4 Set - replace semantics",
+    "gNMI §3.4.5 Set - composite keys",
+    "gNMI §3.4.6 Set - delete",
+    "gNMI §3.4.7 Set - error handling",
+    "gNMI §3.4 Set",
+    "gNMI §3.5.1.1 SubscribeRequest",
+    "gNMI §3.5.1.2 SubscriptionList limits",
+    "gNMI §3.5.1.2 updates_only",
+    "gNMI §3.5.1.2 allow_aggregation",
+    "gNMI §3.5.1.5.1 Subscribe ONCE",
+    "gNMI §3.5.1.5.2 Subscribe STREAM",
+    "gNMI §3.5.1.5.2 STREAM ON_CHANGE",
+    "gNMI §3.5.1.5.2 STREAM SAMPLE",
+    "gNMI §3.5.1.5.2 suppress_redundant",
+    "gNMI §3.5.1.5.2 heartbeat",
+    "gNMI §3.5.1.5.3 Subscribe POLL",
+    "gNMI §3.5 Subscribe - aliases",
+    "gNMI §3.5 Subscribe",
+    # Extensions
+    "gNMI ext.Commit",
+    "gNMI ext.Depth",
+    # RFCs
+    "RFC 8341 §3.4.1 NACM read",
+    "RFC 8341 §3.4.2 NACM write",
+    "RFC 8341 §3.4.5 NACM exec",
+    "RFC 8341 §3.7 NACM defaults",
+    "RFC 8342 §4.2 Candidate DS",
+    # Other
+    "gNMI RPC/Action",
+    "Stress Tests",
+    "Interop gnmic",
+]
+
+
+def _classify_test(name):
+    """Return the gNMI/RFC spec section for a test function name."""
+    for prefix, section in _COMPLIANCE_MAP:
+        if name.startswith(prefix):
+            return section
+    return "Uncategorized"
+
+
+# Collect per-test results for the compliance matrix
+_compliance_results = OrderedDict()
+
+
+@pytest.fixture(autouse=True)
+def _compliance_classname(request, record_xml_attribute):
+    """Override JUnit XML classname to group tests by spec section."""
+    section = _classify_test(request.node.name)
+    record_xml_attribute("classname", section)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Collect test outcomes by spec section for compliance matrix."""
+    outcome = yield
+    report = outcome.get_result()
+    if call.when == "call":
+        section = _classify_test(item.name)
+        _compliance_results.setdefault(section, [])
+        _compliance_results[section].append((item.name, report.outcome))
+    elif call.when == "setup" and report.skipped:
+        section = _classify_test(item.name)
+        _compliance_results.setdefault(section, [])
+        _compliance_results[section].append((item.name, "skipped"))
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """Print gNMI compliance matrix and write Markdown summary."""
+    if not _compliance_results:
+        return
+
+    # Build rows in preferred display order
+    rows = []
+    seen = set()
+    for section in _SECTION_ORDER:
+        if section in _compliance_results:
+            seen.add(section)
+            tests = _compliance_results[section]
+            passed = sum(1 for _, o in tests if o == "passed")
+            failed = sum(1 for _, o in tests if o == "failed")
+            skipped = sum(1 for _, o in tests if o == "skipped")
+            rows.append((section, len(tests), passed, failed, skipped))
+    # Append any sections not in the preferred order
+    for section, tests in _compliance_results.items():
+        if section not in seen:
+            passed = sum(1 for _, o in tests if o == "passed")
+            failed = sum(1 for _, o in tests if o == "failed")
+            skipped = sum(1 for _, o in tests if o == "skipped")
+            rows.append((section, len(tests), passed, failed, skipped))
+
+    # Terminal output
+    terminalreporter.section("gNMI Compliance Matrix")
+    hdr = f"{'Spec Section':<40} {'Total':>5} {'Pass':>5} {'Fail':>5} {'Skip':>5}  Status"
+    terminalreporter.write_line(hdr)
+    terminalreporter.write_line("-" * len(hdr))
+    for section, total, passed, failed, skipped in rows:
+        if failed > 0:
+            status = "FAIL"
+        elif skipped > 0 and passed > 0:
+            status = "PARTIAL"
+        elif skipped > 0:
+            status = "SKIP"
+        else:
+            status = "PASS"
+        terminalreporter.write_line(
+            f"{section:<40} {total:>5} {passed:>5} {failed:>5} {skipped:>5}  {status}"
+        )
+    total_tests = sum(t for _, t, _, _, _ in rows)
+    total_pass = sum(p for _, _, p, _, _ in rows)
+    total_fail = sum(f for _, _, _, f, _ in rows)
+    total_skip = sum(s for _, _, _, _, s in rows)
+    terminalreporter.write_line("-" * len(hdr))
+    terminalreporter.write_line(
+        f"{'TOTAL':<40} {total_tests:>5} {total_pass:>5} {total_fail:>5} {total_skip:>5}"
+    )
+
+    # Write Markdown summary for CI ($GITHUB_STEP_SUMMARY)
+    build_dir = os.environ.get("GNMI_BUILD_DIR", "builddir")
+    try:
+        summary_path = os.path.join(build_dir, "compliance-summary.md")
+        with open(summary_path, "w") as f:
+            f.write("## gNMI Compliance Matrix\n\n")
+            f.write("| Spec Section | Total | Pass | Fail | Skip | Status |\n")
+            f.write("|---|:---:|:---:|:---:|:---:|:---:|\n")
+            for section, total, passed, failed, skipped in rows:
+                if failed > 0:
+                    status = ":x:"
+                elif skipped > 0 and passed > 0:
+                    status = ":warning:"
+                elif skipped > 0:
+                    status = ":fast_forward:"
+                else:
+                    status = ":white_check_mark:"
+                f.write(f"| {section} | {total} | {passed} "
+                        f"| {failed} | {skipped} | {status} |\n")
+            f.write(f"| **TOTAL** | **{total_tests}** | **{total_pass}** "
+                    f"| **{total_fail}** | **{total_skip}** | |\n")
+    except OSError:
+        pass  # Non-fatal: CI directory may not exist in local runs
 
 # Add tests/ dir and proto/ subdir to path for imports
 sys.path.insert(0, os.path.dirname(__file__))

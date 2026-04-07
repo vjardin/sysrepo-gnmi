@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  checks: write
+  actions: read
+
 jobs:
   static-analysis:
     runs-on: ubuntu-latest
@@ -102,7 +107,30 @@ jobs:
           no_proxy: localhost,127.0.0.1
           ASAN_OPTIONS: detect_leaks=0
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
-        run: sudo -E .venv/bin/pytest tests/ -v --tb=short
+        run: |
+          sudo -E .venv/bin/pytest tests/ -v --tb=short \
+            --junitxml=${{ github.workspace }}/test-results-${{ matrix.cesnet_version }}-${{ matrix.sanitizer }}.xml
+      - name: Test Report
+        uses: dorny/test-reporter@v3
+        if: always()
+        with:
+          name: tests-${{ matrix.cesnet_version }}-${{ matrix.sanitizer }}
+          path: test-results-${{ matrix.cesnet_version }}-${{ matrix.sanitizer }}.xml
+          reporter: java-junit
+      - name: Compliance Summary
+        if: always()
+        run: |
+          summary="${{ github.workspace }}/builddir/compliance-summary.md"
+          if [ -f "$summary" ]; then
+            echo "### ${{ matrix.cesnet_version }} / ${{ matrix.sanitizer }}" >> $GITHUB_STEP_SUMMARY
+            cat "$summary" >> $GITHUB_STEP_SUMMARY
+          fi
+      - name: Upload test results
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-results-${{ matrix.cesnet_version }}-${{ matrix.sanitizer }}
+          path: test-results-${{ matrix.cesnet_version }}-${{ matrix.sanitizer }}.xml
 
   deb:
     runs-on: ubuntu-latest
