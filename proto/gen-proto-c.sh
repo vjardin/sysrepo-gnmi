@@ -11,7 +11,8 @@ mkdir -p "$OUTDIR"
 # Generate well-known types into outdir (preserving google/protobuf/ subdir)
 protoc --proto_path="$PROTO_INC" --c_out="$OUTDIR" \
     "$PROTO_INC/google/protobuf/any.proto" \
-    "$PROTO_INC/google/protobuf/descriptor.proto"
+    "$PROTO_INC/google/protobuf/descriptor.proto" \
+    "$PROTO_INC/google/protobuf/duration.proto"
 
 # Generate gNMI protos
 protoc --proto_path="$PROTO_DIR" --proto_path="$PROTO_INC" --c_out="$OUTDIR" \

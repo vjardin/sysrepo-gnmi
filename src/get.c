@@ -16,6 +16,23 @@
 #include <libyang/libyang.h>
 
 #include "gnmi.pb-c.h"
+#include "gnmi_ext.pb-c.h"
+
+/* - Extension helpers --------------------------------------------- */
+
+/* Extract depth level from gNMI extensions (0 = unlimited).
+ * gNMI depth 1 = "target + direct children" but sysrepo max_depth 1 = "target only".
+ * Add 1 to align semantics: gnmi depth N → sysrepo max_depth N+1. */
+static uint32_t get_depth_from_extensions(GnmiExt__Extension **ext, size_t n_ext)
+{
+  for (size_t i = 0; i < n_ext; i++) {
+    if (ext[i]->ext_case == GNMI_EXT__EXTENSION__EXT_DEPTH && ext[i]->depth) {
+      uint32_t level = ext[i]->depth->level;
+      return level > 0 ? level + 1 : 0;
+    }
+  }
+  return 0;
+}
 
 /* - Build updates for a single xpath ------------------------------ */
 
@@ -38,7 +55,7 @@ static bool model_filter_match(const struct lyd_node *node,
 
 static grpc_status_code
 build_get_updates(sr_session_ctx_t *sess, const char *fullpath,
-    Gnmi__Encoding encoding,
+    Gnmi__Encoding encoding, uint32_t max_depth,
     Gnmi__ModelData **use_models, size_t n_use_models,
     Gnmi__Notification *notif, char **err_msg)
 {
@@ -46,8 +63,8 @@ build_get_updates(sr_session_ctx_t *sess, const char *fullpath,
   struct ly_set *set = NULL;
   grpc_status_code ret = GRPC_STATUS_OK;
 
-  /* Fetch data from sysrepo */
-  int rc = sr_get_data(sess, fullpath, 0, 0, 0, &sr_data);
+  /* Fetch data from sysrepo (max_depth 0 = unlimited) */
+  int rc = sr_get_data(sess, fullpath, max_depth, 0, 0, &sr_data);
   if (rc != SR_ERR_OK) {
     if (rc == SR_ERR_NOT_FOUND)
       return GRPC_STATUS_OK; /* empty is fine */
@@ -136,6 +153,7 @@ static grpc_status_code
 build_get_notification(sr_session_ctx_t *sess, const Gnmi__Path *prefix, const Gnmi__Path *path,
            Gnmi__Encoding encoding,
            Gnmi__GetRequest__DataType data_type,
+           uint32_t max_depth,
            Gnmi__ModelData **use_models, size_t n_use_models,
            Gnmi__Notification *notif,
            char **err_msg)
@@ -177,7 +195,7 @@ build_get_notification(sr_session_ctx_t *sess, const Gnmi__Path *prefix, const G
   orig_ds = sr_session_get_ds(sess);
   sr_session_switch_ds(sess, ds);
 
-  ret = build_get_updates(sess, fullpath, encoding, use_models, n_use_models, notif, err_msg);
+  ret = build_get_updates(sess, fullpath, encoding, max_depth, use_models, n_use_models, notif, err_msg);
 
   /* Restore original datastore */
   sr_session_switch_ds(sess, orig_ds);
@@ -234,6 +252,9 @@ grpc_status_code handle_get(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
   if (n_paths == 0)
     n_paths = 1; /* root path */
 
+  /* Extract depth extension (0 = unlimited) */
+  uint32_t max_depth = get_depth_from_extensions(req->extension, req->n_extension);
+
   resp.n_notification = n_paths;
   resp.notification = calloc(n_paths, sizeof(Gnmi__Notification *));
   if (!resp.notification)
@@ -252,7 +273,7 @@ grpc_status_code handle_get(sr_conn_ctx_t *sr_conn, grpc_byte_buffer *request_bb
       path = &root_path;
 
     ret = build_get_notification(sess, req->prefix, path, req->encoding, req->type,
-                                   req->use_models, req->n_use_models, notif, status_msg);
+                                   max_depth, req->use_models, req->n_use_models, notif, status_msg);
     if (ret != GRPC_STATUS_OK)
       goto cleanup;
   }

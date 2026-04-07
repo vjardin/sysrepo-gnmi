@@ -181,3 +181,30 @@ def test_gnmic_subscribe_stream_sample(gnmi_server):
 
     # If it returned before timeout, still check output
     assert "test-state" in result.stdout
+
+
+# -- Depth extension --
+
+def test_gnmic_get_depth(gnmi_server):
+    """gnmic get with --depth 1 returns only direct children."""
+    data = _gnmic("get", "--path", "/gnmi-server-test:test-state",
+                  "-e", "json_ietf", "--depth", "1")
+    assert len(data) >= 1
+    updates = data[0].get("updates", [])
+    assert len(updates) >= 1
+    vals_json = json.dumps(updates[0].get("values", {}))
+    # depth 1: should have "things" key but NOT nested "counter" values
+    assert "things" in vals_json
+    assert "counter" not in vals_json, \
+        f"depth=1 should not include nested counter, got: {vals_json}"
+
+
+def test_gnmic_get_no_depth(gnmi_server):
+    """gnmic get without --depth returns full tree including nested leaves."""
+    data = _gnmic("get", "--path", "/gnmi-server-test:test-state",
+                  "-e", "json_ietf")
+    assert len(data) >= 1
+    updates = data[0].get("updates", [])
+    vals_json = json.dumps(updates[0].get("values", {}))
+    # No depth limit: should include nested "counter" values
+    assert "counter" in vals_json
