@@ -71,9 +71,10 @@ static int
 build_subscribe_data(struct stream_ctx *sctx, Gnmi__SubscriptionList *sublist)
 {
   sr_conn_ctx_t *sr_conn = gnmi_server_get_sr_conn(sctx->base.srv);
+  const char *user = sctx->session ? sctx->session->username : NULL;
   sr_session_ctx_t *sess = NULL;
   int rc = gnmi_nacm_session_start_as(sr_conn, SR_DS_OPERATIONAL,
-    sctx->stream_user, &sess);
+    user, &sess);
   if (rc != SR_ERR_OK)
     return -1;
 
@@ -299,16 +300,17 @@ static void step_send_initial_metadata(struct stream_ctx *sctx, bool success)
     return;
   }
 
-  /* Extract per-stream username from client metadata (gnmic --username).
-   * Stored in stream_ctx so concurrent streams keep their own identity. */
+  /* Extract per-stream username from client metadata (gnmic --username). */
+  const char *md_user = NULL;
   for (size_t i = 0; i < sctx->base.md_recv.count; i++) {
     grpc_slice key = sctx->base.md_recv.metadata[i].key;
     if (grpc_slice_eq(key, grpc_slice_from_static_string("username"))) {
       grpc_slice val = sctx->base.md_recv.metadata[i].value;
       sctx->stream_user = strndup(
         (const char *)GRPC_SLICE_START_PTR(val), GRPC_SLICE_LENGTH(val));
-      if (sctx->stream_user)
-        gnmi_log(GNMI_LOG_DEBUG, "Subscribe metadata username: %s", sctx->stream_user);
+      md_user = sctx->stream_user;
+      if (md_user)
+        gnmi_log(GNMI_LOG_DEBUG, "Subscribe metadata username: %s", md_user);
       break;
     }
   }
@@ -317,7 +319,7 @@ static void step_send_initial_metadata(struct stream_ctx *sctx, bool success)
   char *peer = grpc_call_get_peer(sctx->base.call);
   if (peer) {
     sctx->session = gnmi_session_get(
-        gnmi_server_get_sessions(sctx->base.srv), peer, sctx->stream_user);
+        gnmi_server_get_sessions(sctx->base.srv), peer, md_user);
     if (sctx->session) {
       gnmi_session_touch(sctx->session);
       gnmi_session_stream_add(sctx->session);
@@ -610,8 +612,9 @@ static void stream_arm_subscriptions(struct stream_ctx *sctx)
   sctx->allow_aggregation = sl->allow_aggregation;
 
   /* Create a session for STREAM mode data fetching (with per-stream NACM user) */
+  const char *stream_user = sctx->session ? sctx->session->username : NULL;
   int rc = gnmi_nacm_session_start_as(sr_conn, SR_DS_OPERATIONAL,
-    sctx->stream_user, &sctx->sr_sess);
+    stream_user, &sctx->sr_sess);
   if (rc != SR_ERR_OK) {
     gnmi_log(GNMI_LOG_ERROR, "Subscribe STREAM: sr_session_start failed: %s", sr_strerror(rc));
     stream_close(sctx, GRPC_STATUS_INTERNAL, "Failed to start sysrepo session");

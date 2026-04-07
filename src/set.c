@@ -9,6 +9,7 @@
 #include "confirm.h"
 #include "xpath.h"
 #include "encode.h"
+#include "session.h"
 #include "log.h"
 
 #include <stdbool.h>
@@ -342,9 +343,12 @@ process_updates(sr_session_ctx_t *sess, size_t n_updates, Gnmi__Update **updates
 
 /* - Set RPC handler ----------------------------------------------- */
 
-grpc_status_code handle_set(sr_conn_ctx_t *sr_conn, const char *user, grpc_byte_buffer *request_bb, grpc_byte_buffer **response_bb,
+grpc_status_code handle_set(sr_conn_ctx_t *sr_conn,
+          const struct gnmi_session *session,
+          grpc_byte_buffer *request_bb, grpc_byte_buffer **response_bb,
           char **status_msg)
 {
+  const char *user = session ? session->username : NULL;
   Gnmi__SetRequest *req = NULL;
   Gnmi__SetResponse resp = GNMI__SET_RESPONSE__INIT;
   sr_session_ctx_t *sess = NULL;

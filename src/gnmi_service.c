@@ -52,7 +52,8 @@ ProtobufCMessage *gnmi_unpack(const ProtobufCMessageDescriptor *desc, grpc_byte_
 
 /* - RPC method table ---------------------------------------------- */
 
-typedef grpc_status_code (*unary_handler_fn)(sr_conn_ctx_t *sr_conn, const char *user,
+typedef grpc_status_code (*unary_handler_fn)(sr_conn_ctx_t *sr_conn,
+               const struct gnmi_session *session,
                grpc_byte_buffer *req, grpc_byte_buffer **resp, char **status_msg);
 
 struct rpc_method {
@@ -139,7 +140,7 @@ static void step_got_call(struct call_ctx *base, bool success)
   }
 
   if (m->handler) {
-    code = m->handler(gnmi_server_get_sr_conn(base->srv), rpc_user, base->request_payload, &response_bb, &status_msg);
+    code = m->handler(gnmi_server_get_sr_conn(base->srv), session, base->request_payload, &response_bb, &status_msg);
   } else {
     code = GRPC_STATUS_UNIMPLEMENTED;
     status_msg = strdup("Not implemented");

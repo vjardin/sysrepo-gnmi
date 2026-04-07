@@ -4,6 +4,7 @@
  */
 
 #include "capabilities.h"
+#include "session.h"
 #include "log.h"
 
 #include <stdlib.h>
@@ -15,7 +16,9 @@
 
 #include "gnmi.pb-c.h"
 
-grpc_status_code handle_capabilities(sr_conn_ctx_t *sr_conn, const char *user, grpc_byte_buffer *request_bb,
+grpc_status_code handle_capabilities(sr_conn_ctx_t *sr_conn,
+             const struct gnmi_session *session,
+             grpc_byte_buffer *request_bb,
              grpc_byte_buffer **response_bb,
              char **status_msg)
 {
@@ -27,6 +30,8 @@ grpc_status_code handle_capabilities(sr_conn_ctx_t *sr_conn, const char *user, g
   sr_data_t *sr_data = NULL;
   Gnmi__CapabilityResponse resp = GNMI__CAPABILITY_RESPONSE__INIT;
   grpc_status_code ret = GRPC_STATUS_INTERNAL;
+
+  const char *user = session ? session->username : NULL;
 
   /* Create a temporary session (with NACM user if configured) */
   int rc = gnmi_nacm_session_start_as(sr_conn, SR_DS_RUNNING, user, &sess);

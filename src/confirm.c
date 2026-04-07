@@ -199,9 +199,12 @@ uint64_t confirm_state_earliest_ns(confirm_state_t *cs)
 
 /* - Confirm RPC handler ------------------------------------------- */
 
-grpc_status_code handle_confirm(sr_conn_ctx_t *sr_conn, const char *user, grpc_byte_buffer *request_bb, grpc_byte_buffer **response_bb,
+grpc_status_code handle_confirm(sr_conn_ctx_t *sr_conn,
+        const struct gnmi_session *session,
+        grpc_byte_buffer *request_bb, grpc_byte_buffer **response_bb,
         char **status_msg)
 {
+  (void)session;
   Gnmi__ConfirmRequest *req = NULL;
   Gnmi__ConfirmResponse resp = GNMI__CONFIRM_RESPONSE__INIT;
   confirm_state_t *cs = confirm_state_get_global();

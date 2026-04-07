@@ -57,8 +57,12 @@ void confirm_state_clear(confirm_state_t *cs);
 bool confirm_state_waiting(confirm_state_t *cs);
 uint64_t confirm_state_earliest_ns(confirm_state_t *cs);
 
+struct gnmi_session;
+
 /* Confirm RPC handler */
-grpc_status_code handle_confirm(sr_conn_ctx_t *sr_conn, const char *user, grpc_byte_buffer *request_bb, grpc_byte_buffer **response_bb,
+grpc_status_code handle_confirm(sr_conn_ctx_t *sr_conn,
+        const struct gnmi_session *session,
+        grpc_byte_buffer *request_bb, grpc_byte_buffer **response_bb,
         char **status_msg);
 
 /* Set the global confirm state (called from server init) */

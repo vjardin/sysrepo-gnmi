@@ -7,6 +7,7 @@
 #include "gnmi_service.h"
 #include "xpath.h"
 #include "encode.h"
+#include "session.h"
 #include "log.h"
 
 #include <stdlib.h>
@@ -206,13 +207,16 @@ build_get_notification(sr_session_ctx_t *sess, const Gnmi__Path *prefix, const G
 
 /* - Get RPC handler ----------------------------------------------- */
 
-grpc_status_code handle_get(sr_conn_ctx_t *sr_conn, const char *user, grpc_byte_buffer *request_bb, grpc_byte_buffer **response_bb,
+grpc_status_code handle_get(sr_conn_ctx_t *sr_conn,
+          const struct gnmi_session *session,
+          grpc_byte_buffer *request_bb, grpc_byte_buffer **response_bb,
           char **status_msg)
 {
   Gnmi__GetRequest *req = NULL;
   Gnmi__GetResponse resp = GNMI__GET_RESPONSE__INIT;
   sr_session_ctx_t *sess = NULL;
   grpc_status_code ret = GRPC_STATUS_INTERNAL;
+  const char *user = session ? session->username : NULL;
 
   /* Unpack request */
   req = (Gnmi__GetRequest *)gnmi_unpack( &gnmi__get_request__descriptor, request_bb);
