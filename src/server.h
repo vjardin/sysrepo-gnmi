@@ -10,6 +10,7 @@
 #include <grpc/grpc.h>
 
 struct event_base;  /* forward */
+typedef struct gnmi_session_registry gnmi_session_registry_t;
 
 typedef struct gnmi_server gnmi_server_t;
 
@@ -36,3 +37,4 @@ sr_conn_ctx_t          *gnmi_server_get_sr_conn(gnmi_server_t *srv);
 bool                    gnmi_server_is_shutting_down(gnmi_server_t *srv);
 struct event_base      *gnmi_server_get_evbase(gnmi_server_t *srv);
 const char             *gnmi_server_get_nacm_user(gnmi_server_t *srv);
+gnmi_session_registry_t *gnmi_server_get_sessions(gnmi_server_t *srv);

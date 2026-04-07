@@ -111,6 +111,7 @@ gnmi_src = files(
   'src/main.c',
   'src/log.c',
   'src/server.c',
+  'src/session.c',
   'src/gnmi_service.c',
   'src/capabilities.c',
   'src/xpath.c',

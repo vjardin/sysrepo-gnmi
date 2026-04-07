@@ -9,6 +9,7 @@
 #include "server.h"
 #include "xpath.h"
 #include "encode.h"
+#include "session.h"
 #include "log.h"
 
 #include <stdlib.h>
@@ -16,6 +17,7 @@
 
 #include <grpc/grpc.h>
 #include <grpc/byte_buffer.h>
+#include <grpc/support/alloc.h>
 #include <sysrepo.h>
 #include <libyang/libyang.h>
 
@@ -309,6 +311,18 @@ static void step_send_initial_metadata(struct stream_ctx *sctx, bool success)
         gnmi_log(GNMI_LOG_DEBUG, "Subscribe metadata username: %s", sctx->stream_user);
       break;
     }
+  }
+
+  /* Track session for this stream */
+  char *peer = grpc_call_get_peer(sctx->base.call);
+  if (peer) {
+    sctx->session = gnmi_session_get(
+        gnmi_server_get_sessions(sctx->base.srv), peer, sctx->stream_user);
+    if (sctx->session) {
+      gnmi_session_touch(sctx->session);
+      gnmi_session_stream_add(sctx->session);
+    }
+    gpr_free(peer);
   }
 
   /* Re-arm to accept next Subscribe call */
@@ -1086,6 +1100,9 @@ static void step_close_done(struct stream_ctx *sctx, bool success)
 
 static void stream_free(struct stream_ctx *sctx)
 {
+  /* Decrement session stream count */
+  gnmi_session_stream_del(sctx->session);
+
   if (sctx->recv_msg)
     grpc_byte_buffer_destroy(sctx->recv_msg);
   if (sctx->send_msg)

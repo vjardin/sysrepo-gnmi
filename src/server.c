@@ -7,6 +7,7 @@
 #include "gnmi_service.h"
 #include "confirm.h"
 #include "set.h"
+#include "session.h"
 #include "log.h"
 
 #include <stdlib.h>
@@ -28,6 +29,8 @@ struct gnmi_server {
   const char             *nacm_user;  /* NACM user for sessions, or NULL */
   bool                    shutting_down;
   int                     idle_polls;  /* consecutive empty CQ polls */
+  gnmi_session_registry_t *sessions;
+  struct event           *ev_session_reap;  /* periodic idle session reaper */
 };
 
 /* Adaptive CQ polling */
@@ -110,6 +113,21 @@ static void on_signal_cb(evutil_socket_t sig, short what, void *arg)
     gnmi_log(GNMI_LOG_WARNING, "Forced exit on second signal");
     exit(EXIT_FAILURE);
   }
+}
+
+/* - Session idle reaper ------------------------------------------- */
+
+#define SESSION_REAP_INTERVAL_SEC  30   /* check every 30s */
+#define SESSION_IDLE_TIMEOUT_SEC   60   /* reap after 60s idle (no active streams) */
+
+static void on_session_reap_cb(evutil_socket_t fd, short what, void *arg)
+{
+  (void)fd; (void)what;
+  gnmi_server_t *srv = arg;
+  gnmi_session_reap_idle(srv->sessions, SESSION_IDLE_TIMEOUT_SEC);
+  /* Re-arm */
+  struct timeval tv = { .tv_sec = SESSION_REAP_INTERVAL_SEC };
+  evtimer_add(srv->ev_session_reap, &tv);
 }
 
 /* - Public API ---------------------------------------------------- */
@@ -217,6 +235,12 @@ gnmi_server_t *gnmi_server_create(const struct gnmi_config *cfg, sr_conn_ctx_t *
   srv->ev_cq_poll = evtimer_new(srv->evbase, on_cq_poll_cb, srv);
   evtimer_add(srv->ev_cq_poll, &tv);
 
+  /* Session registry + idle reaper */
+  srv->sessions = gnmi_session_registry_create();
+  srv->ev_session_reap = evtimer_new(srv->evbase, on_session_reap_cb, srv);
+  struct timeval reap_tv = { .tv_sec = SESSION_REAP_INTERVAL_SEC };
+  evtimer_add(srv->ev_session_reap, &reap_tv);
+
   return srv;
 
 err:
@@ -261,6 +285,18 @@ void gnmi_server_destroy(gnmi_server_t *srv)
   if (srv->ev_sigint) {
     event_del(srv->ev_sigint);
     event_free(srv->ev_sigint);
+  }
+
+  /* Session registry cleanup */
+  if (srv->ev_session_reap) {
+    event_del(srv->ev_session_reap);
+    event_free(srv->ev_session_reap);
+  }
+  if (srv->sessions) {
+    uint32_t n = gnmi_session_count(srv->sessions);
+    if (n > 0)
+      gnmi_log(GNMI_LOG_INFO, "Shutdown: %u active session(s)", n);
+    gnmi_session_registry_destroy(srv->sessions);
   }
 
   /* Release candidate session if held */
@@ -318,4 +354,9 @@ struct event_base *gnmi_server_get_evbase(gnmi_server_t *srv)
 const char *gnmi_server_get_nacm_user(gnmi_server_t *srv)
 {
   return srv->nacm_user;
+}
+
+gnmi_session_registry_t *gnmi_server_get_sessions(gnmi_server_t *srv)
+{
+  return srv->sessions;
 }

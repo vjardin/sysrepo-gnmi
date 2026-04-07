@@ -10,6 +10,7 @@
 #include <sysrepo.h>
 
 #include "gnmi_service.h"
+#include "session.h"
 #include "gnmi.pb-c.h"
 
 /*
@@ -60,6 +61,9 @@ struct stream_ctx {
 
   /* Per-stream NACM user (extracted from gRPC metadata at accept time) */
   char            *stream_user;
+
+  /* Session tracking (non-owning pointer into the session registry) */
+  struct gnmi_session *session;
 
   /* Current recv buffer */
   grpc_byte_buffer *recv_msg;

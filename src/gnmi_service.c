@@ -11,6 +11,7 @@
 #include "subscribe.h"
 #include "rpc.h"
 #include "confirm.h"
+#include "session.h"
 #include "log.h"
 
 #include <stdlib.h>
@@ -126,12 +127,27 @@ static void step_got_call(struct call_ctx *base, bool success)
   if (rpc_user)
     gnmi_log(GNMI_LOG_DEBUG, "RPC metadata username: %s", rpc_user);
 
+  /* Track session */
+  char *peer = grpc_call_get_peer(base->call);
+  struct gnmi_session *session = NULL;
+  if (peer) {
+    session = gnmi_session_get(
+        gnmi_server_get_sessions(base->srv), peer, rpc_user);
+    if (session)
+      gnmi_session_touch(session);
+    gpr_free(peer);
+  }
+
   if (m->handler) {
     code = m->handler(gnmi_server_get_sr_conn(base->srv), rpc_user, base->request_payload, &response_bb, &status_msg);
   } else {
     code = GRPC_STATUS_UNIMPLEMENTED;
     status_msg = strdup("Not implemented");
   }
+
+  if (session && code != GRPC_STATUS_OK)
+    gnmi_session_record_error(session);
+
   gnmi_log(GNMI_LOG_DEBUG, "RPC %s completed (status=%d%s%s)",
            m->path, code,
            status_msg ? " msg=" : "",
