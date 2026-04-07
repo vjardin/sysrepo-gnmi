@@ -348,6 +348,117 @@ sudo systemctl status gnmi-server
 gnmic -a localhost:50051 --insecure capabilities
 ```
 
+## Using gnmic
+
+[gnmic](https://github.com/openconfig/gnmic) is the reference gNMI CLI client.
+Install it from the [releases page](https://github.com/openconfig/gnmic/releases)
+or via the .deb package. Both JSON and JSON_IETF encodings are supported
+(gnmic defaults to JSON).
+
+### Capabilities
+
+```sh
+gnmic -a localhost:50051 --insecure capabilities
+```
+
+### Get
+
+```sh
+# Full tree
+gnmic get --insecure -a localhost:50051 --path /gnmi-server-test:test-state
+
+# With depth limit (only top-level children)
+gnmic get --insecure -a localhost:50051 --path /gnmi-server-test:test-state --depth 1
+
+# With per-RPC username (NACM)
+gnmic get --insecure -a localhost:50051 \
+  --username operator \
+  --path /gnmi-server-test:test-state
+```
+
+### Set (update, replace, delete)
+
+```sh
+# Update a leaf
+gnmic set --insecure -a localhost:50051 \
+  --update-path /gnmi-server-test:test/things[name=demo]/description \
+  --update-value '"hello-gnmic"'
+
+# Replace a container (absent children are deleted)
+gnmic set --insecure -a localhost:50051 \
+  --replace-path /gnmi-server-test:test2 \
+  --replace-value '{"gnmi-server-test:enabled": true}'
+
+# Delete
+gnmic set --insecure -a localhost:50051 --delete /gnmi-server-test:test/things[name=demo]
+```
+
+### Subscribe
+
+```sh
+# ONCE (snapshot)
+gnmic subscribe --insecure -a localhost:50051 --path /gnmi-server-test:test-state --mode once
+
+# STREAM with SAMPLE interval
+gnmic subscribe --insecure -a localhost:50051 --path /gnmi-server-test:test-state --mode stream \
+  --stream-mode sample --sample-interval 1s
+
+# STREAM with ON_CHANGE
+gnmic subscribe --insecure -a localhost:50051 --path /gnmi-server-test:test --mode stream \
+  --stream-mode on-change
+```
+
+### Confirmed commit (with automatic rollback)
+
+gnmic supports the standard gNMI commit-confirmed extension. This
+allows staging a change with automatic rollback if not confirmed
+within a timeout:
+
+```sh
+# 1. Apply a change with 60-second rollback timer
+gnmic set --insecure -a localhost:50051 \
+  --commit-request --commit-id mychange --rollback-duration 60s \
+  --update-path /gnmi-server-test:test/things[name=CC]/description \
+  --update-value '"staged-change"'
+
+# 2a. Confirm (persist the change before timeout)
+gnmic set --insecure -a localhost:50051 --commit-id mychange --commit-confirm
+
+# 2b. Or cancel (rollback immediately)
+gnmic set --insecure -a localhost:50051 --commit-id mychange --commit-cancel
+
+# 2c. Or do nothing -- the server rolls back after 60 seconds
+```
+
+### Candidate datastore
+
+The server supports a candidate datastore for staging multiple changes
+before committing them atomically. Use the `target` field in the path
+prefix:
+
+```sh
+# 1. Stage changes in candidate (not applied to running)
+gnmic set --insecure -a localhost:50051 --target candidate \
+  --update-path /gnmi-server-test:test/things[name=Stage1]/description \
+  --update-value '"first-change"'
+
+gnmic set --insecure -a localhost:50051 --target candidate \
+  --update-path /gnmi-server-test:test/things[name=Stage2]/description \
+  --update-value '"second-change"'
+
+# 2. Read from candidate to verify before committing
+gnmic get --insecure -a localhost:50051 --target candidate --path /gnmi-server-test:test
+
+# 3a. Commit all staged changes to running atomically
+gnmic set --insecure -a localhost:50051 --target commit-candidate
+
+# 3b. Or discard all staged changes
+gnmic set --insecure -a localhost:50051 --target discard-candidate
+```
+
+The candidate session is locked on first use and auto-discarded after
+5 minutes of inactivity.
+
 ## Design
 
 The server uses a single-threaded event loop architecture based on libevent:
