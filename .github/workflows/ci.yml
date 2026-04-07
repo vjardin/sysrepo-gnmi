@@ -113,6 +113,8 @@ jobs:
           no_proxy: localhost,127.0.0.1
           ASAN_OPTIONS: detect_leaks=0
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          GNMI_LOG_LEVEL_SR: 4
+          GNMI_LOG_LEVEL_LY: 4
         run: |
           sudo -E .venv/bin/pytest tests/ -v --tb=short \
             --junitxml=${{ github.workspace }}/test-results-${{ matrix.cesnet_version }}-${{ matrix.sanitizer }}.xml

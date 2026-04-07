@@ -382,6 +382,9 @@ def gnmi_env():
         "GNMI_YANG_DIR",
         os.path.join(os.path.dirname(__file__), "yang"),
     )
+    # Per-subsystem debug logging for CI and local test runs
+    env.setdefault("GNMI_LOG_LEVEL_SR", "4")
+    env.setdefault("GNMI_LOG_LEVEL_LY", "4")
     return env, build_dir
 
 

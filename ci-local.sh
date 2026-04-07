@@ -79,6 +79,8 @@ for V in $VERSIONS; do
             export no_proxy=localhost,127.0.0.1
             export ASAN_OPTIONS=detect_leaks=0
             export UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1
+            export GNMI_LOG_LEVEL_SR=4
+            export GNMI_LOG_LEVEL_LY=4
             .venv/bin/pytest tests/ -v --tb=short
         "; then
         echo "=== $LABEL: PASSED ==="
