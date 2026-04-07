@@ -17,15 +17,21 @@ struct gnmi_session_registry {
   struct gnmi_session *head;
   uint32_t             count;
   struct event_base   *evbase;
+  int                  max_sessions;
+  int                  max_streams_per_session;
 };
 
 static atomic_uint_least64_t next_id = 1;
 
-gnmi_session_registry_t *gnmi_session_registry_create(struct event_base *evbase)
+gnmi_session_registry_t *gnmi_session_registry_create(struct event_base *evbase,
+    int max_sessions, int max_streams_per_session)
 {
   gnmi_session_registry_t *reg = calloc(1, sizeof(*reg));
-  if (reg)
+  if (reg) {
     reg->evbase = evbase;
+    reg->max_sessions = max_sessions;
+    reg->max_streams_per_session = max_streams_per_session;
+  }
   return reg;
 }
 
@@ -69,6 +75,13 @@ struct gnmi_session *gnmi_session_get(gnmi_session_registry_t *reg,
     }
   }
 
+  /* Enforce max sessions limit */
+  if (reg->max_sessions > 0 && (int)reg->count >= reg->max_sessions) {
+    gnmi_log(GNMI_LOG_WARNING, "Max sessions reached (%d), rejecting %s",
+             reg->max_sessions, peer_addr);
+    return NULL;
+  }
+
   /* Create new session */
   struct gnmi_session *s = calloc(1, sizeof(*s));
   if (!s)
@@ -110,11 +123,20 @@ void gnmi_session_record_error(struct gnmi_session *s)
     s->rpc_errors++;
 }
 
-void gnmi_session_stream_add(struct gnmi_session *s)
+int gnmi_session_stream_add(struct gnmi_session *s)
 {
   if (!s)
-    return;
+    return -1;
+  if (s->registry && s->registry->max_streams_per_session > 0 &&
+      s->active_streams >= s->registry->max_streams_per_session) {
+    gnmi_log(GNMI_LOG_WARNING,
+             "Session %lu: max streams reached (%d), rejecting from %s",
+             (unsigned long)s->id, s->registry->max_streams_per_session,
+             s->peer_addr);
+    return -1;
+  }
   s->active_streams++;
+  return 0;
 }
 
 void gnmi_session_stream_del(struct gnmi_session *s)

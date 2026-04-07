@@ -38,6 +38,8 @@ static void usage(const char *prog)
     "  -f, --insecure          No TLS, no authentication\n"
     "  -S, --syslog            Log to syslog (in addition to stderr)\n"
     "  -L, --log-dir DIR       Transaction data log directory\n"
+    "  -M, --max-sessions N    Max concurrent sessions (0=unlimited, default: 0)\n"
+    "  -m, --max-streams N     Max subscribe streams per session (0=unlimited, default: 0)\n"
     "  -v, --version           Print version and exit\n"
     "  -h, --help              Print this help\n",
     prog, GNMI_DEFAULT_BIND);
@@ -53,9 +55,11 @@ static const struct option longopts[] = {
   { "log-level", required_argument, NULL, 'l' },
   { "insecure",  no_argument,       NULL, 'f' },
   { "syslog",    no_argument,       NULL, 'S' },
-  { "log-dir",   required_argument, NULL, 'L' },
-  { "version",   no_argument,       NULL, 'v' },
-  { "help",      no_argument,       NULL, 'h' },
+  { "log-dir",       required_argument, NULL, 'L' },
+  { "max-sessions",  required_argument, NULL, 'M' },
+  { "max-streams",   required_argument, NULL, 'm' },
+  { "version",       no_argument,       NULL, 'v' },
+  { "help",          no_argument,       NULL, 'h' },
   { NULL, 0, NULL, 0 },
 };
 
@@ -69,7 +73,7 @@ int main(int argc, char **argv)
   int enable_syslog = 0;
   const char *log_dir = NULL;
 
-  while ((opt = getopt_long(argc, argv, "b:k:c:a:u:p:l:fSL:vh", longopts, NULL)) != -1) {
+  while ((opt = getopt_long(argc, argv, "b:k:c:a:u:p:l:fSL:M:m:vh", longopts, NULL)) != -1) {
     switch (opt) {
     case 'b': cfg.bind_addr = optarg;
       break;
@@ -90,6 +94,10 @@ int main(int argc, char **argv)
     case 'S': enable_syslog = 1;
       break;
     case 'L': log_dir = optarg;
+      break;
+    case 'M': cfg.max_sessions = atoi(optarg);
+      break;
+    case 'm': cfg.max_streams_per_session = atoi(optarg);
       break;
     case 'v': printf("sysrepo-gnmi %s\n", GNMI_SERVER_VERSION);
       return EXIT_SUCCESS;

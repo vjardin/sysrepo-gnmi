@@ -50,8 +50,10 @@ struct gnmi_session {
 
 struct event_base;
 
-/* Create / destroy the registry */
-gnmi_session_registry_t *gnmi_session_registry_create(struct event_base *evbase);
+/* Create / destroy the registry.
+ * max_sessions: 0 = unlimited, max_streams_per_session: 0 = unlimited. */
+gnmi_session_registry_t *gnmi_session_registry_create(struct event_base *evbase,
+    int max_sessions, int max_streams_per_session);
 void gnmi_session_registry_destroy(gnmi_session_registry_t *reg);
 
 /* Look up or create a session for the given peer address.
@@ -66,8 +68,9 @@ void gnmi_session_touch(struct gnmi_session *s);
 /* Record an RPC error */
 void gnmi_session_record_error(struct gnmi_session *s);
 
-/* Increment / decrement active stream count */
-void gnmi_session_stream_add(struct gnmi_session *s);
+/* Increment / decrement active stream count.
+ * stream_add returns 0 on success, -1 if max_streams_per_session exceeded. */
+int gnmi_session_stream_add(struct gnmi_session *s);
 void gnmi_session_stream_del(struct gnmi_session *s);
 
 /* Get total active sessions and streams */

@@ -139,7 +139,11 @@ static void step_got_call(struct call_ctx *base, bool success)
     gpr_free(peer);
   }
 
-  if (m->handler) {
+  /* Reject if max sessions exceeded (session is NULL for new peers at limit) */
+  if (!session) {
+    code = GRPC_STATUS_RESOURCE_EXHAUSTED;
+    status_msg = strdup("Max sessions exceeded");
+  } else if (m->handler) {
     code = m->handler(gnmi_server_get_sr_conn(base->srv), session, base->request_payload, &response_bb, &status_msg);
   } else {
     code = GRPC_STATUS_UNIMPLEMENTED;

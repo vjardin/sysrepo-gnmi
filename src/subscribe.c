@@ -320,15 +320,21 @@ static void step_send_initial_metadata(struct stream_ctx *sctx, bool success)
   if (peer) {
     sctx->session = gnmi_session_get(
         gnmi_server_get_sessions(sctx->base.srv), peer, md_user);
-    if (sctx->session) {
+    if (sctx->session)
       gnmi_session_touch(sctx->session);
-      gnmi_session_stream_add(sctx->session);
-    }
     gpr_free(peer);
   }
 
   /* Re-arm to accept next Subscribe call */
   subscribe_arm(sctx->base.srv, sctx->method_idx);
+
+  /* Enforce per-session stream limit */
+  if (!sctx->session || gnmi_session_stream_add(sctx->session) < 0) {
+    stream_close(sctx, GRPC_STATUS_RESOURCE_EXHAUSTED,
+                 sctx->session ? "Too many streams for this session"
+                               : "Max sessions exceeded");
+    return;
+  }
 
   /* Send initial metadata */
   grpc_op op = {0};

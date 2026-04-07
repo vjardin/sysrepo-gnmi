@@ -23,6 +23,8 @@ struct gnmi_config {
   const char *password;
   int         log_level;
   bool        insecure;
+  int         max_sessions;           /* 0 = unlimited */
+  int         max_streams_per_session; /* 0 = unlimited */
 };
 
 gnmi_server_t *gnmi_server_create(const struct gnmi_config *cfg, sr_conn_ctx_t *sr_conn);

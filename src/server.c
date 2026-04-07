@@ -232,7 +232,8 @@ gnmi_server_t *gnmi_server_create(const struct gnmi_config *cfg, sr_conn_ctx_t *
   evtimer_add(srv->ev_cq_poll, &tv);
 
   /* Session registry + idle reaper */
-  srv->sessions = gnmi_session_registry_create(srv->evbase);
+  srv->sessions = gnmi_session_registry_create(srv->evbase,
+      cfg->max_sessions, cfg->max_streams_per_session);
   srv->ev_session_reap = evtimer_new(srv->evbase, on_session_reap_cb, srv);
   struct timeval reap_tv = { .tv_sec = SESSION_REAP_INTERVAL_SEC };
   evtimer_add(srv->ev_session_reap, &reap_tv);
