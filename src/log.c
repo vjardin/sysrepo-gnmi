@@ -144,6 +144,44 @@ static void gnmi_ly_log_cb(LY_LOG_LEVEL level, const char *msg,
   gnmi_log(lvl, "libyang: %s", msg);
 }
 
+/* - Structured sysrepo error collection --------------------------- */
+
+char *gnmi_collect_sr_errors(sr_session_ctx_t *sess, int rc)
+{
+  const sr_error_info_t *err_info = NULL;
+  sr_session_get_error(sess, &err_info);
+
+  if (!err_info || err_info->err_count == 0)
+    return strdup(sr_strerror(rc));
+
+  if (err_info->err_count == 1)
+    return strdup(err_info->err[0].message);
+
+  /* Multiple errors: concatenate with separator */
+  size_t total_len = 0;
+  for (uint32_t i = 0; i < err_info->err_count; i++) {
+    if (!err_info->err[i].message)
+      continue;
+    total_len += strlen(err_info->err[i].message) + 4;
+  }
+  total_len += 32; /* prefix: "N errors: " */
+
+  char *msg = malloc(total_len);
+  if (!msg)
+    return strdup(err_info->err[0].message);
+
+  int off = snprintf(msg, total_len, "%u errors: ", err_info->err_count);
+  for (uint32_t i = 0; i < err_info->err_count; i++) {
+    if (!err_info->err[i].message)
+      continue;
+    if (i > 0)
+      off += snprintf(msg + off, total_len - off, "; ");
+    off += snprintf(msg + off, total_len - off, "%s",
+                    err_info->err[i].message);
+  }
+  return msg;
+}
+
 /* - Transaction data logging -------------------------------------- */
 
 void gnmi_log_data_init(const char *log_dir)

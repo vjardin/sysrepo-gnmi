@@ -69,12 +69,13 @@ build_get_updates(sr_session_ctx_t *sess, const char *fullpath,
     if (rc == SR_ERR_NOT_FOUND)
       return GRPC_STATUS_OK; /* empty is fine */
     if (err_msg) {
-      char buf[512];
-      if (rc == SR_ERR_LY || rc == SR_ERR_INVAL_ARG)
+      if (rc == SR_ERR_LY || rc == SR_ERR_INVAL_ARG) {
+        char buf[512];
         snprintf(buf, sizeof(buf), "YANG path not found: %s (check if the module is installed in sysrepo)", fullpath);
-      else
-        snprintf(buf, sizeof(buf), "sr_get_data failed: %s", sr_strerror(rc));
-      *err_msg = strdup(buf);
+        *err_msg = strdup(buf);
+      } else {
+        *err_msg = gnmi_collect_sr_errors(sess, rc);
+      }
     }
     return (rc == SR_ERR_LY || rc == SR_ERR_INVAL_ARG) ? GRPC_STATUS_NOT_FOUND : GRPC_STATUS_INTERNAL;
   }

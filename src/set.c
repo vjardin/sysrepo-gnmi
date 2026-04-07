@@ -576,12 +576,7 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn, const char *user, grpc_byte_
   if (eb.root) {
     rc = sr_edit_batch(sess, eb.root, "merge");
     if (rc != SR_ERR_OK) {
-      const sr_error_info_t *err_info = NULL;
-      sr_session_get_error(sess, &err_info);
-      if (err_info && err_info->err_count > 0)
-        *status_msg = strdup(err_info->err[0].message);
-      else
-        *status_msg = strdup(sr_strerror(rc));
+      *status_msg = gnmi_collect_sr_errors(sess, rc);
       sr_discard_changes(sess);
       ret = GRPC_STATUS_ABORTED;
       goto cleanup;
@@ -590,12 +585,7 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn, const char *user, grpc_byte_
 
   rc = sr_apply_changes(sess, 0);
   if (rc != SR_ERR_OK) {
-    const sr_error_info_t *err_info = NULL;
-    sr_session_get_error(sess, &err_info);
-    if (err_info && err_info->err_count > 0)
-      *status_msg = strdup(err_info->err[0].message);
-    else
-      *status_msg = strdup(sr_strerror(rc));
+    *status_msg = gnmi_collect_sr_errors(sess, rc);
     sr_discard_changes(sess);
     ret = GRPC_STATUS_ABORTED;
     goto cleanup;

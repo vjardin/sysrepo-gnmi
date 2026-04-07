@@ -25,6 +25,11 @@ void gnmi_log_enable_syslog(const char *ident);
 void gnmi_log(enum gnmi_log_level lvl, const char *fmt, ...)
   __attribute__((format(printf, 2, 3)));
 
+/* Collect all sysrepo session errors into a single message string.
+ * Returns a malloc'd string combining all error messages.
+ * Falls back to sr_strerror(rc) if no detailed errors are available. */
+char *gnmi_collect_sr_errors(sr_session_ctx_t *sess, int rc);
+
 /* Transaction data logging (audit trail).
  * Writes data to a file in log_dir/raw/ for traceability.
  * Pass log_dir=NULL to disable. */
