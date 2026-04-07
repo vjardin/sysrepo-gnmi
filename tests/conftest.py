@@ -91,6 +91,7 @@ _COMPLIANCE_MAP = [
     ("test_get", "gNMI §3.3 Get"),
 
     # --- gNMI §3.4 Set
+    ("test_set_validate", "gNMI §3.4 Set - validate-only"),
     ("test_set_candidate", "RFC 8342 §4.2 Candidate DS"),
     ("test_set_while_waiting_confirm", "gNMI ext.Commit"),
     ("test_set_replace_removes_absent", "gNMI §3.4.4 Set - replace semantics"),

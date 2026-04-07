@@ -325,6 +325,7 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn,
   struct edit_batch eb;
   grpc_status_code ret = GRPC_STATUS_INTERNAL;
   bool use_candidate = false;
+  bool dry_run = false;
   char *prefix_xpath = NULL;
 
   edit_batch_init(&eb);
@@ -350,6 +351,7 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn,
   const char *target = (req->prefix && req->prefix->target) ?
     req->prefix->target : "";
   use_candidate = (strcmp(target, "candidate") == 0);
+  dry_run = (strcmp(target, "validate") == 0);
 
   /* commit-candidate: copy candidate to running, then release.
    * sr_copy_config(sess, mod, src_ds, timeout) copies FROM src_ds
@@ -576,26 +578,33 @@ grpc_status_code handle_set(sr_conn_ctx_t *sr_conn,
     }
   }
 
-  rc = sr_apply_changes(sess, 0);
-  if (rc != SR_ERR_OK) {
-    *status_msg = gnmi_collect_sr_errors(sess, rc);
+  if (dry_run) {
+    /* Validate-only: sr_edit_batch already validated paths and values
+     * against the YANG schema. Discard without applying. */
+    gnmi_log(GNMI_LOG_INFO, "Set validate-only: %zu operation(s) OK", n_results);
     sr_discard_changes(sess);
-    ret = GRPC_STATUS_ABORTED;
-    goto cleanup;
-  }
-
-  /* Persist to startup (skip for candidate and confirmed-commit) */
-  if (use_candidate) {
-    /* Candidate: changes stay in candidate until commit-candidate */
-  } else if (has_confirm && cs) {
-    /* Timer already armed by confirm_state_snapshot above */
   } else {
-    /* No confirm - persist to startup immediately */
-    sr_session_ctx_t *startup_sess = NULL;
-    rc = sr_session_start(sr_conn, SR_DS_STARTUP, &startup_sess);
-    if (rc == SR_ERR_OK) {
-      sr_copy_config(startup_sess, NULL, SR_DS_RUNNING, 0);
-      sr_session_stop(startup_sess);
+    rc = sr_apply_changes(sess, 0);
+    if (rc != SR_ERR_OK) {
+      *status_msg = gnmi_collect_sr_errors(sess, rc);
+      sr_discard_changes(sess);
+      ret = GRPC_STATUS_ABORTED;
+      goto cleanup;
+    }
+
+    /* Persist to startup (skip for candidate and confirmed-commit) */
+    if (use_candidate) {
+      /* Candidate: changes stay in candidate until commit-candidate */
+    } else if (has_confirm && cs) {
+      /* Timer already armed by confirm_state_snapshot above */
+    } else {
+      /* No confirm - persist to startup immediately */
+      sr_session_ctx_t *startup_sess = NULL;
+      rc = sr_session_start(sr_conn, SR_DS_STARTUP, &startup_sess);
+      if (rc == SR_ERR_OK) {
+        sr_copy_config(startup_sess, NULL, SR_DS_RUNNING, 0);
+        sr_session_stop(startup_sess);
+      }
     }
   }
 

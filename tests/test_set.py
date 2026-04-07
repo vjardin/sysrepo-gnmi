@@ -1550,3 +1550,58 @@ def test_set_candidate_multi_step(gnmi_stub):
             xpath_to_path("/gnmi-server-test:test/things[name='Multi2']"),
         ],
     ), timeout=5)
+
+
+# - Validate-only (dry-run) tests ------------------------------------
+
+
+def test_set_validate_succeeds_without_applying(gnmi_stub):
+    """Validate-only Set: valid data returns OK but is not applied.
+
+    Uses prefix target="validate" to trigger dry-run mode.
+    """
+    path = xpath_to_path(
+        "/gnmi-server-test:test/things[name='DryRunGhost']"
+    )
+    data = json.dumps({"description": "should not persist"})
+    req = gnmi_pb2.SetRequest(
+        prefix=gnmi_pb2.Path(target="validate"),
+        update=[gnmi_pb2.Update(
+            path=path,
+            val=gnmi_pb2.TypedValue(json_ietf_val=data.encode()),
+        )],
+    )
+    resp = gnmi_stub.Set(req, timeout=5)
+    assert resp.timestamp > 0
+    assert len(resp.response) == 1
+
+    # Verify the data was NOT applied to running
+    get_req = gnmi_pb2.GetRequest(
+        path=[xpath_to_path(
+            "/gnmi-server-test:test/things[name='DryRunGhost']"
+        )],
+        type=gnmi_pb2.GetRequest.CONFIG,
+        encoding=gnmi_pb2.JSON_IETF,
+    )
+    get_resp = gnmi_stub.Get(get_req, timeout=5)
+    # Either empty notification or no update
+    for notif in get_resp.notification:
+        for upd in notif.update:
+            val = upd.val.json_ietf_val.decode()
+            assert "DryRunGhost" not in val, \
+                "validate-only data must not appear in running"
+
+
+def test_set_validate_rejects_invalid_path(gnmi_stub):
+    """Validate-only Set: invalid YANG path is rejected."""
+    path = xpath_to_path("/gnmi-server-test:nonexistent/bogus")
+    req = gnmi_pb2.SetRequest(
+        prefix=gnmi_pb2.Path(target="validate"),
+        update=[gnmi_pb2.Update(
+            path=path,
+            val=gnmi_pb2.TypedValue(json_ietf_val=b'"whatever"'),
+        )],
+    )
+    with pytest.raises(grpc.RpcError) as exc_info:
+        gnmi_stub.Set(req, timeout=5)
+    assert exc_info.value.code() != grpc.StatusCode.OK
