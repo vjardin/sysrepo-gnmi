@@ -70,9 +70,9 @@ handle_get_schema(sr_conn_ctx_t *sr_conn, const Gnmi__RpcRequest *req,
   if (!mod) {
     sr_session_release_context(sess);
     sr_session_stop(sess);
-    cJSON_Delete(obj);
     if (asprintf(status_msg, "Module '%s' not found", name) < 0)
       *status_msg = strdup("Module not found");
+    cJSON_Delete(obj);
     return GRPC_STATUS_NOT_FOUND;
   }
 
@@ -87,11 +87,11 @@ handle_get_schema(sr_conn_ctx_t *sr_conn, const Gnmi__RpcRequest *req,
 
   sr_session_release_context(sess);
   sr_session_stop(sess);
-  cJSON_Delete(obj);
 
   /* Read the YANG file */
   FILE *f = fopen(yang_path, "r");
   if (!f) {
+    cJSON_Delete(obj);
     if (asprintf(status_msg, "Cannot read schema file: %s", strerror(errno)) < 0)
       *status_msg = strdup("Cannot read schema file");
     return GRPC_STATUS_NOT_FOUND;
@@ -104,12 +104,16 @@ handle_get_schema(sr_conn_ctx_t *sr_conn, const Gnmi__RpcRequest *req,
   char *schema = malloc(fsize + 1);
   if (!schema) {
     fclose(f);
+    cJSON_Delete(obj);
     *status_msg = strdup("Out of memory");
     return GRPC_STATUS_RESOURCE_EXHAUSTED;
   }
   size_t nread = fread(schema, 1, fsize, f);
   schema[nread] = '\0';
   fclose(f);
+
+  gnmi_log(GNMI_LOG_DEBUG, "get-schema: returned '%s' (%zu bytes)", name, nread);
+  cJSON_Delete(obj);
 
   /* Build JSON response: {"sysrepo-gnmi-monitoring:schema": "..."} */
   cJSON *out_obj = cJSON_CreateObject();
@@ -127,8 +131,6 @@ handle_get_schema(sr_conn_ctx_t *sr_conn, const Gnmi__RpcRequest *req,
   resp.val->json_ietf_val.len = strlen(out_json);
 
   *response_bb = gnmi_pack((ProtobufCMessage *)&resp);
-
-  gnmi_log(GNMI_LOG_DEBUG, "get-schema: returned '%s' (%zu bytes)", name, nread);
 
   cJSON_free(out_json);
   free(resp.val);
